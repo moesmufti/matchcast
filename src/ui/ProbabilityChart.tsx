@@ -1,4 +1,5 @@
 import type { MatchEvent, ProbabilitySnapshot, TeamId } from '../domain/types'
+import { ET_FIRST_END, ET_SECOND_END, REGULATION_MINUTES } from '../domain/clock'
 
 const WIDTH = 600
 const HEIGHT = 230
@@ -7,7 +8,9 @@ const MARGIN_BOTTOM = 24
 const MARGIN_LEFT = 30
 const PLOT_HEIGHT = HEIGHT - MARGIN_TOP - MARGIN_BOTTOM
 const PLOT_WIDTH = WIDTH - MARGIN_LEFT
-const FULL_MATCH = 90
+const FULL_MATCH = REGULATION_MINUTES
+const REGULATION_TICKS = [15, 30, 45, 60, 75, 90]
+const EXTRA_TIME_TICKS = [15, 30, 45, 60, 75, 90, ET_FIRST_END, ET_SECOND_END]
 
 type SeriesKey = 'home' | 'draw' | 'away'
 
@@ -75,7 +78,15 @@ interface GoalMarker {
 
 export function ProbabilityChart({ history, events }: ProbabilityChartProps) {
   const lastMinute = history.length > 0 ? history[history.length - 1].minute : 0
-  const domainMax = Math.max(FULL_MATCH, lastMinute)
+  // Extra time only ever starts after the 'extra-time-start' event fires, so
+  // gate the extended domain/ticks on that rather than on lastMinute alone —
+  // second-half stoppage alone can already push lastMinute past 90, and a
+  // regulation-only match must keep rendering exactly as it does today.
+  const hasEnteredExtraTime = events.some((e) => e.type === 'extra-time-start')
+  const domainMax = hasEnteredExtraTime
+    ? Math.max(ET_SECOND_END, lastMinute)
+    : Math.max(FULL_MATCH, lastMinute)
+  const ticks = hasEnteredExtraTime ? EXTRA_TIME_TICKS : REGULATION_TICKS
   const xs = xPositions(history, domainMax)
   const homeLine = buildLine(history, xs, 'home')
   const drawLine = buildLine(history, xs, 'draw')
@@ -95,7 +106,7 @@ export function ProbabilityChart({ history, events }: ProbabilityChartProps) {
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           preserveAspectRatio="none"
           role="img"
-          aria-label="Win probability over the 90 minutes for France, draw and England, with goals marked"
+          aria-label={`Win probability over ${hasEnteredExtraTime ? 'the match, including extra time,' : 'the 90 minutes'} for France, draw and England, with goals marked`}
         >
           <title>Win probability timeline</title>
           {[0, 25, 50, 75, 100].map((line) => (
@@ -112,7 +123,7 @@ export function ProbabilityChart({ history, events }: ProbabilityChartProps) {
               </text>
             </g>
           ))}
-          {[15, 30, 45, 60, 75, 90].map((minute) => (
+          {ticks.map((minute) => (
             <g key={minute}>
               <line
                 className={`chart__minute-line${minute === 45 ? ' chart__minute-line--ht' : ''}`}
@@ -126,7 +137,13 @@ export function ProbabilityChart({ history, events }: ProbabilityChartProps) {
                 x={xFor(minute, domainMax)}
                 y={HEIGHT - 8}
               >
-                {minute === 45 ? 'HT' : `${minute}'`}
+                {minute === 45
+                  ? 'HT'
+                  : hasEnteredExtraTime && minute === 90
+                    ? 'FT'
+                    : hasEnteredExtraTime && minute === ET_FIRST_END
+                      ? 'ET'
+                      : `${minute}'`}
               </text>
             </g>
           ))}
@@ -151,7 +168,7 @@ export function ProbabilityChart({ history, events }: ProbabilityChartProps) {
               />
             </g>
           ))}
-          {lastMinute > 0 && lastMinute < FULL_MATCH && (
+          {lastMinute > 0 && lastMinute < domainMax && (
             <line
               className="chart__now-line"
               x1={xFor(lastMinute, domainMax)}

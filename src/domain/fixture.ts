@@ -35,9 +35,17 @@ export function createInitialMatch(): Match {
       },
     },
     phase: 'pre-match',
+    // Third-place match: a winner is required — level after 90 means extra
+    // time, still level means penalties.
+    knockout: true,
     minute: 0,
     stoppageMinute: 0,
-    announcedStoppage: { firstHalf: null, secondHalf: null },
+    announcedStoppage: {
+      firstHalf: null,
+      secondHalf: null,
+      extraTimeFirst: null,
+      extraTimeSecond: null,
+    },
     score: { home: 0, away: 0 },
     redCards: { home: 0, away: 0 },
     shots: {

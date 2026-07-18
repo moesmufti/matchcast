@@ -54,6 +54,17 @@ export interface LiveFeedSubstitution {
   playerIn: LiveFeedPlayerRef
 }
 
+/**
+ * One penalty-shootout kick. v4 lists these as a flat array in the order
+ * taken (best-of-5, then sudden death) — `player` is defensively optional
+ * since the vendor doesn't guarantee it's populated for every kick.
+ */
+export interface LiveFeedPenaltyKick {
+  player?: LiveFeedPlayerRef | null
+  team: LiveFeedTeamRef
+  scored: boolean
+}
+
 export interface LiveFeedTeamStatistics {
   shots?: number
   shots_on_goal?: number
@@ -90,10 +101,22 @@ export interface LiveFeedPayload {
   score: {
     fullTime: { home: number | null; away: number | null }
     halfTime: { home: number | null; away: number | null }
+    /** Goals after regulation alone (90'); populated once extra time is reached. */
+    regularTime?: { home: number | null; away: number | null }
+    /** Goals scored in extra time alone (91-120'); populated once extra time is played. */
+    extraTime?: { home: number | null; away: number | null }
+    /** Converted shootout kicks (not goals) — totals only, once a shootout has started. */
+    penalties?: { home: number | null; away: number | null }
+    /** Which stage decided the match; absent while still in regulation. */
+    duration?: 'REGULAR' | 'EXTRA_TIME' | 'PENALTY_SHOOTOUT'
+    /** Final result once decided. */
+    winner?: 'HOME_TEAM' | 'AWAY_TEAM' | 'DRAW' | null
   }
   goals: LiveFeedGoal[]
   bookings: LiveFeedBooking[]
   substitutions: LiveFeedSubstitution[]
+  /** Penalty-shootout kicks in the order taken; absent/empty until a shootout starts. */
+  penalties?: LiveFeedPenaltyKick[]
   homeTeam: LiveFeedTeam
   awayTeam: LiveFeedTeam
 }

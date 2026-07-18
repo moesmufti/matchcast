@@ -321,6 +321,16 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.hero__pens {
+  font-family: var(--font-display);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+}
+
 .hero__bug {
   display: inline-flex;
   align-items: center;

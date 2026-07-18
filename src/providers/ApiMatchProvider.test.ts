@@ -187,4 +187,193 @@ describe('mapFeedToMatch', () => {
     expect(match.phase).toBe('full-time')
     expect(match.events.find((e) => e.id === 'full-time')).toBeDefined()
   })
+
+  // --- extra time / penalties -----------------------------------------------
+
+  it('maps EXTRA_TIME m=98 to extra-time-first', () => {
+    const feed = baseFeed({
+      status: 'EXTRA_TIME',
+      minute: 98,
+      injuryTime: null,
+      score: { fullTime: { home: 1, away: 1 }, halfTime: { home: 1, away: 0 } },
+    })
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    expect(match.phase).toBe('extra-time-first')
+    expect(match.minute).toBe(98)
+    expect(match.stoppageMinute).toBe(0)
+  })
+
+  it('maps EXTRA_TIME m=107 with null injuryTime to extra-time-second', () => {
+    const feed = baseFeed({
+      status: 'EXTRA_TIME',
+      minute: 107,
+      injuryTime: null,
+      score: { fullTime: { home: 1, away: 1 }, halfTime: { home: 1, away: 0 } },
+    })
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    expect(match.phase).toBe('extra-time-second')
+    expect(match.minute).toBe(107)
+  })
+
+  it('records extra-time-first announced stoppage once and does not let a later et-second poll overwrite or backfill it', () => {
+    // Poll 1: m=105 with the fourth official's board up for ET1 (2 minutes).
+    // Vendor status/minute still read as the tail of the first ET period.
+    const firstFeed = baseFeed({
+      status: 'EXTRA_TIME',
+      minute: 105,
+      injuryTime: 2,
+      score: { fullTime: { home: 1, away: 1 }, halfTime: { home: 1, away: 0 } },
+    })
+    const first = mapFeedToMatch(firstFeed, createInitialContext(), NOW_MS)
+    expect(first.match.phase).toBe('extra-time-first')
+    expect(first.match.announcedStoppage.extraTimeFirst).toBe(2)
+
+    // Poll 2: m=106 now reads as et-second (per the accepted misread past
+    // 105). The already-recorded extraTimeFirst must survive untouched, and
+    // extraTimeSecond stays null since m hasn't reached its base (120) yet.
+    const secondFeed = baseFeed({
+      status: 'EXTRA_TIME',
+      minute: 106,
+      injuryTime: null,
+      score: { fullTime: { home: 1, away: 1 }, halfTime: { home: 1, away: 0 } },
+    })
+    const second = mapFeedToMatch(secondFeed, first.context, NOW_MS)
+
+    expect(second.match.phase).toBe('extra-time-second')
+    expect(second.match.announcedStoppage.extraTimeFirst).toBe(2)
+    expect(second.match.announcedStoppage.extraTimeSecond).toBeNull()
+  })
+
+  it('clamps EXTRA_TIME m=121 to minute 120 with stoppage 1', () => {
+    const feed = baseFeed({
+      status: 'EXTRA_TIME',
+      minute: 121,
+      injuryTime: 1,
+      score: { fullTime: { home: 1, away: 1 }, halfTime: { home: 1, away: 0 } },
+    })
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    expect(match.minute).toBe(120)
+    expect(match.stoppageMinute).toBe(1)
+  })
+
+  it('maps PAUSED m=105 to extra-time-half-time', () => {
+    const feed = baseFeed({
+      status: 'PAUSED',
+      minute: 105,
+      score: { fullTime: { home: 1, away: 1 }, halfTime: { home: 1, away: 0 } },
+    })
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    expect(match.phase).toBe('extra-time-half-time')
+  })
+
+  it('maps PAUSED m=90 to extra-time-break', () => {
+    const feed = baseFeed({
+      status: 'PAUSED',
+      minute: 90,
+      score: { fullTime: { home: 1, away: 1 }, halfTime: { home: 1, away: 0 } },
+    })
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    expect(match.phase).toBe('extra-time-break')
+  })
+
+  it('maps PAUSED m=45 to half-time (regression)', () => {
+    const feed = baseFeed({
+      status: 'PAUSED',
+      minute: 45,
+      score: { fullTime: { home: 0, away: 0 }, halfTime: { home: null, away: null } },
+    })
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    expect(match.phase).toBe('half-time')
+  })
+
+  it('maps an in-progress PENALTY_SHOOTOUT with kicks and a running score', () => {
+    const feed = baseFeed({
+      status: 'PENALTY_SHOOTOUT',
+      minute: null,
+      score: {
+        fullTime: { home: 1, away: 1 },
+        halfTime: { home: 1, away: 0 },
+        penalties: { home: 3, away: 2 },
+      },
+      penalties: [
+        { team: { id: 1, name: 'Home FC' }, player: { id: 301, name: 'Kicker A' }, scored: true },
+        { team: { id: 2, name: 'Away FC' }, player: { id: 302, name: 'Kicker B' }, scored: true },
+        { team: { id: 1, name: 'Home FC' }, player: { id: 303, name: 'Kicker C' }, scored: false },
+        { team: { id: 2, name: 'Away FC' }, player: { id: 304, name: 'Kicker D' }, scored: true },
+        { team: { id: 1, name: 'Home FC' }, player: { id: 305, name: 'Kicker E' }, scored: true },
+      ],
+    })
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    expect(match.phase).toBe('penalties')
+    // Match.score is open-play goals only — never shootout kicks.
+    expect(match.score).toEqual({ home: 1, away: 1 })
+
+    expect(match.penalties).toBeDefined()
+    expect(match.penalties?.score).toEqual({ home: 3, away: 2 })
+    expect(match.penalties?.firstKicker).toBe('home')
+    expect(match.penalties?.kicks.map((k) => k.team)).toEqual([
+      'home',
+      'away',
+      'home',
+      'away',
+      'home',
+    ])
+    expect(match.penalties?.kicks.map((k) => k.scored)).toEqual([true, true, false, true, true])
+    expect(match.penalties?.winner).toBeNull()
+
+    const scoredEvents = match.events.filter((e) => e.type === 'penalty-scored')
+    const missedEvents = match.events.filter((e) => e.type === 'penalty-missed')
+    expect(scoredEvents).toHaveLength(4)
+    expect(missedEvents).toHaveLength(1)
+    expect(match.events.find((e) => e.type === 'penalties-start')).toBeDefined()
+  })
+
+  it('maps FINISHED with duration PENALTY_SHOOTOUT and an away winner', () => {
+    const feed = baseFeed({
+      status: 'FINISHED',
+      minute: null,
+      score: {
+        fullTime: { home: 1, away: 1 },
+        halfTime: { home: 1, away: 0 },
+        penalties: { home: 3, away: 4 },
+        duration: 'PENALTY_SHOOTOUT',
+        winner: 'AWAY_TEAM',
+      },
+    })
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    expect(match.phase).toBe('full-time')
+    expect(match.minute).toBe(120)
+    expect(match.penalties?.winner).toBe('away')
+
+    const fullTimeEvent = match.events.find((e) => e.id === 'full-time')
+    expect(fullTimeEvent?.description).toContain('penalties')
+  })
+
+  it('maps FINISHED with duration EXTRA_TIME and no shootout', () => {
+    const feed = baseFeed({
+      status: 'FINISHED',
+      minute: null,
+      score: {
+        fullTime: { home: 2, away: 1 },
+        halfTime: { home: 1, away: 0 },
+        duration: 'EXTRA_TIME',
+      },
+    })
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    expect(match.phase).toBe('full-time')
+    expect(match.minute).toBe(120)
+    expect(match.penalties).toBeUndefined()
+
+    const fullTimeEvent = match.events.find((e) => e.id === 'full-time')
+    expect(fullTimeEvent?.description).toContain('extra time')
+  })
 })

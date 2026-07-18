@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { computePrediction, normalizeToHundred } from './prediction'
+import { computePrediction, normalizeToHundred, shootoutWinProbability } from './prediction'
 import { createInitialMatch, PRE_MATCH_MODEL } from './fixture'
-import type { Match } from './types'
+import type { Match, PenaltyKick, PenaltyShootout, TeamId } from './types'
 
-function cloneMatch(overrides: Partial<Match> = {}): Match {
+// Overrides accept a *partial* announcedStoppage — the fixture already
+// supplies all four fields, so tests only need to name the ones they care
+// about (e.g. just `secondHalf`, without also repeating the ET fields).
+type MatchOverrides = Partial<Omit<Match, 'announcedStoppage'>> & {
+  announcedStoppage?: Partial<Match['announcedStoppage']>
+}
+
+function cloneMatch(overrides: MatchOverrides = {}): Match {
   const base = createInitialMatch()
   return {
     ...base,
@@ -15,6 +22,36 @@ function cloneMatch(overrides: Partial<Match> = {}): Match {
     announcedStoppage: { ...base.announcedStoppage, ...(overrides.announcedStoppage ?? {}) },
     shots: overrides.shots ?? base.shots,
     events: overrides.events ?? base.events,
+  }
+}
+
+/**
+ * Builds a PenaltyShootout from each team's per-kick scored/missed results,
+ * alternating strictly starting with `firstKicker`. Handy for constructing
+ * exact shootoutWinProbability fixtures without hand-writing kicks arrays.
+ */
+function buildShootout(
+  homeResults: boolean[],
+  awayResults: boolean[],
+  firstKicker: TeamId = 'home',
+): PenaltyShootout {
+  const kicks: PenaltyKick[] = []
+  const maxLen = Math.max(homeResults.length, awayResults.length)
+  for (let i = 0; i < maxLen; i++) {
+    const order: TeamId[] = firstKicker === 'home' ? ['home', 'away'] : ['away', 'home']
+    for (const team of order) {
+      const results = team === 'home' ? homeResults : awayResults
+      if (i < results.length) kicks.push({ team, scored: results[i] })
+    }
+  }
+  return {
+    score: {
+      home: homeResults.filter(Boolean).length,
+      away: awayResults.filter(Boolean).length,
+    },
+    kicks,
+    firstKicker,
+    winner: null,
   }
 }
 
@@ -314,5 +351,189 @@ describe('computePrediction - nextGoalLean', () => {
     const symmetric = { ...PRE_MATCH_MODEL, xgHome: 1.5, xgAway: 1.5 }
     const result = computePrediction({ ...match, phase: 'second-half', minute: 50 }, symmetric)
     expect(result.nextGoalLean).toBe('even')
+  })
+})
+
+describe('computePrediction - knockout flag does not affect the regulation stage', () => {
+  it('second-half result is identical with knockout true or false (result is still "at 90")', () => {
+    const knockoutMatch = cloneMatch({
+      phase: 'second-half',
+      minute: 70,
+      score: { home: 1, away: 1 },
+      knockout: true,
+    })
+    const nonKnockoutMatch = cloneMatch({
+      phase: 'second-half',
+      minute: 70,
+      score: { home: 1, away: 1 },
+      knockout: false,
+    })
+    const a = computePrediction(knockoutMatch, PRE_MATCH_MODEL)
+    const b = computePrediction(nonKnockoutMatch, PRE_MATCH_MODEL)
+    expect(a).toEqual(b)
+    // A knockout draw at 70' is still a real outcome — it just means extra
+    // time follows, it doesn't get redistributed onto home/away here.
+    expect(a.probabilities.draw).toBeGreaterThan(0)
+  })
+})
+
+describe('computePrediction - extra time', () => {
+  it('a level score in extra time keeps a substantial chance of going to penalties', () => {
+    const match = cloneMatch({
+      phase: 'extra-time-first',
+      minute: 100,
+      score: { home: 1, away: 1 },
+      knockout: true,
+    })
+    const result = computePrediction(match, PRE_MATCH_MODEL)
+    const { home, draw, away } = result.probabilities
+    expect(home + draw + away).toBe(100)
+    expect(draw).toBeGreaterThan(30)
+  })
+
+  it('a team leading late in extra time has a high win probability', () => {
+    const match = cloneMatch({
+      phase: 'extra-time-second',
+      minute: 115,
+      score: { home: 2, away: 1 },
+      knockout: true,
+    })
+    const result = computePrediction(match, PRE_MATCH_MODEL)
+    expect(result.probabilities.home).toBeGreaterThan(80)
+    expect(result.probabilities.home).toBeLessThan(100)
+  })
+
+  it('probabilities always sum to 100 across extra-time phases', () => {
+    const phases: Match['phase'][] = [
+      'extra-time-break',
+      'extra-time-first',
+      'extra-time-half-time',
+      'extra-time-second',
+    ]
+    const scores = [
+      { home: 0, away: 0 },
+      { home: 1, away: 1 },
+      { home: 2, away: 1 },
+      { home: 0, away: 2 },
+    ]
+    for (const phase of phases) {
+      for (const score of scores) {
+        const match = cloneMatch({ phase, minute: 100, score, knockout: true })
+        const result = computePrediction(match, PRE_MATCH_MODEL)
+        const { home, draw, away } = result.probabilities
+        expect(home + draw + away).toBe(100)
+      }
+    }
+  })
+
+  it('deep extra-time-second stoppage keeps a lead short of certainty until full-time', () => {
+    const match = cloneMatch({
+      phase: 'extra-time-second',
+      minute: 120,
+      stoppageMinute: 4,
+      announcedStoppage: { extraTimeSecond: 2 },
+      score: { home: 2, away: 1 },
+      knockout: true,
+    })
+    const result = computePrediction(match, PRE_MATCH_MODEL)
+    expect(result.probabilities.home).toBeGreaterThan(80)
+    expect(result.probabilities.home).toBeLessThan(100)
+  })
+})
+
+describe('computePrediction - penalties phase', () => {
+  it('draw is always 0, probabilities sum to 100, and open-play markets are certainties', () => {
+    const match = cloneMatch({
+      phase: 'penalties',
+      minute: 120,
+      score: { home: 1, away: 1 },
+      knockout: true,
+      penalties: buildShootout([true], [true]),
+    })
+    const result = computePrediction(match, PRE_MATCH_MODEL)
+    const { home, draw, away } = result.probabilities
+    expect(draw).toBe(0)
+    expect(home + draw + away).toBe(100)
+    expect(result.btts).toBe(100) // both already scored in open play
+    expect(result.over25).toBe(0) // only 2 open-play goals, no time left
+    expect(result.nextGoalLean).toBe('even')
+  })
+
+  it('falls back to a fresh (symmetric) shootout when match.penalties is absent', () => {
+    const match = cloneMatch({
+      phase: 'penalties',
+      minute: 120,
+      score: { home: 0, away: 0 },
+      knockout: true,
+    })
+    const result = computePrediction(match, PRE_MATCH_MODEL)
+    expect(result.probabilities.home).toBe(50)
+    expect(result.probabilities.away).toBe(50)
+    expect(result.probabilities.draw).toBe(0)
+  })
+})
+
+describe('computePrediction - full-time settled by penalties', () => {
+  it('gives the shootout winner 100% even though the score is level', () => {
+    const match = cloneMatch({
+      phase: 'full-time',
+      minute: 120,
+      score: { home: 1, away: 1 },
+      knockout: true,
+      penalties: { ...buildShootout([true, true, false], [true, true, true]), winner: 'away' },
+    })
+    const result = computePrediction(match, PRE_MATCH_MODEL)
+    expect(result.probabilities.away).toBe(100)
+    expect(result.probabilities.home).toBe(0)
+    expect(result.probabilities.draw).toBe(0)
+    expect(result.confidence).toBe(10)
+  })
+})
+
+describe('shootoutWinProbability', () => {
+  it('a fresh shootout is exactly 0.5 by symmetry', () => {
+    const shootout = buildShootout([], [])
+    expect(shootoutWinProbability(shootout)).toBeCloseTo(0.5, 10)
+  })
+
+  it('3-0 after 3 pairs is already decided (home cannot be caught)', () => {
+    const shootout = buildShootout([true, true, true], [false, false, false])
+    expect(shootoutWinProbability(shootout)).toBe(1)
+  })
+
+  it('a losing team already 0-3 down after 3 pairs is decided at 0', () => {
+    const shootout = buildShootout([false, false, false], [true, true, true])
+    expect(shootoutWinProbability(shootout)).toBe(0)
+  })
+
+  it('5-each and level after the regular best-of-5 resolves to 0.5 (sudden death, symmetric)', () => {
+    const shootout = buildShootout([true, true, true, true, true], [true, true, true, true, true])
+    expect(shootoutWinProbability(shootout)).toBeCloseTo(0.5, 10)
+  })
+
+  it('a mid-sudden-death state where the first kicker of the pair scored', () => {
+    // Regular ends 4-4 (tied), then in the first sudden-death round home
+    // (the pair's first kicker) scores and away hasn't kicked yet.
+    const shootout = buildShootout(
+      [false, true, true, true, true, true],
+      [true, true, true, true, false],
+    )
+    const p = 0.75 // default PENALTY_CONVERSION
+    const expected = 1 - p + p * 0.5
+    expect(shootoutWinProbability(shootout)).toBeCloseTo(expected, 10)
+  })
+
+  it('respects an already-set winner regardless of the raw kick state', () => {
+    const shootout: PenaltyShootout = { ...buildShootout([], []), winner: 'home' }
+    expect(shootoutWinProbability(shootout)).toBe(1)
+    const awayWon: PenaltyShootout = { ...buildShootout([], []), winner: 'away' }
+    expect(shootoutWinProbability(awayWon)).toBe(0)
+  })
+
+  it('is deterministic: identical input yields identical output', () => {
+    const shootout = buildShootout([true, false, true], [false, true, true])
+    const a = shootoutWinProbability(shootout)
+    const b = shootoutWinProbability(shootout)
+    expect(a).toBe(b)
   })
 })

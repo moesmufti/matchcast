@@ -3,6 +3,7 @@ import type {
   LiveFeedBooking,
   LiveFeedGoal,
   LiveFeedPayload,
+  LiveFeedPenaltyKick,
   LiveFeedResponse,
   LiveFeedSubstitution,
   LiveFeedTeam,
@@ -83,6 +84,12 @@ interface VendorSubstitution {
   playerIn: VendorPlayerRef
 }
 
+interface VendorPenaltyKick {
+  player?: VendorPlayerRef | null
+  team: VendorTeamRef
+  scored: boolean
+}
+
 interface VendorTeamStatistics {
   shots?: number
   shots_on_goal?: number
@@ -116,10 +123,16 @@ interface VendorMatchBody {
   score?: {
     fullTime?: { home: number | null; away: number | null }
     halfTime?: { home: number | null; away: number | null }
+    regularTime?: { home: number | null; away: number | null }
+    extraTime?: { home: number | null; away: number | null }
+    penalties?: { home: number | null; away: number | null }
+    duration?: 'REGULAR' | 'EXTRA_TIME' | 'PENALTY_SHOOTOUT'
+    winner?: 'HOME_TEAM' | 'AWAY_TEAM' | 'DRAW' | null
   }
   goals?: VendorGoal[]
   bookings?: VendorBooking[]
   substitutions?: VendorSubstitution[]
+  penalties?: VendorPenaltyKick[]
   homeTeam: VendorTeam
   awayTeam: VendorTeam
 }
@@ -225,6 +238,14 @@ function toFeedSubstitution(s: VendorSubstitution): LiveFeedSubstitution {
   }
 }
 
+function toFeedPenaltyKick(k: VendorPenaltyKick): LiveFeedPenaltyKick {
+  return {
+    player: k.player ? { id: k.player.id, name: k.player.name } : null,
+    team: { id: k.team.id, name: k.team.name },
+    scored: k.scored,
+  }
+}
+
 function toFeedPayload(body: VendorMatchBody): LiveFeedPayload {
   return {
     status: body.status,
@@ -241,10 +262,26 @@ function toFeedPayload(body: VendorMatchBody): LiveFeedPayload {
         home: body.score?.halfTime?.home ?? null,
         away: body.score?.halfTime?.away ?? null,
       },
+      // Unlike fullTime/halfTime, the vendor only sends these once they're
+      // relevant (no extra time played yet, no shootout started) — mirror
+      // that absence rather than always filling in a null placeholder, since
+      // the client's shootout-detection logic keys off presence.
+      regularTime: body.score?.regularTime
+        ? { home: body.score.regularTime.home ?? null, away: body.score.regularTime.away ?? null }
+        : undefined,
+      extraTime: body.score?.extraTime
+        ? { home: body.score.extraTime.home ?? null, away: body.score.extraTime.away ?? null }
+        : undefined,
+      penalties: body.score?.penalties
+        ? { home: body.score.penalties.home ?? null, away: body.score.penalties.away ?? null }
+        : undefined,
+      duration: body.score?.duration,
+      winner: body.score?.winner ?? null,
     },
     goals: (body.goals ?? []).map(toFeedGoal),
     bookings: (body.bookings ?? []).map(toFeedBooking),
     substitutions: (body.substitutions ?? []).map(toFeedSubstitution),
+    penalties: body.penalties?.map(toFeedPenaltyKick),
     homeTeam: toFeedTeam(body.homeTeam),
     awayTeam: toFeedTeam(body.awayTeam),
   }

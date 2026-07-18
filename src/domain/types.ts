@@ -14,7 +14,18 @@ export interface Team {
   tagline: string
 }
 
-export type MatchPhase = 'pre-match' | 'first-half' | 'half-time' | 'second-half' | 'full-time'
+export type MatchPhase =
+  | 'pre-match'
+  | 'first-half'
+  | 'half-time'
+  | 'second-half'
+  /** 90' whistle with scores level in a knockout — short break before extra time. */
+  | 'extra-time-break'
+  | 'extra-time-first'
+  | 'extra-time-half-time'
+  | 'extra-time-second'
+  | 'penalties'
+  | 'full-time'
 
 export type MatchEventType =
   | 'kickoff'
@@ -27,6 +38,12 @@ export type MatchEventType =
   | 'stoppage-announced'
   | 'half-time'
   | 'second-half-start'
+  | 'extra-time-start'
+  | 'extra-time-half-time'
+  | 'extra-time-second-start'
+  | 'penalties-start'
+  | 'penalty-scored'
+  | 'penalty-missed'
   | 'full-time'
   | 'clock'
 
@@ -52,6 +69,22 @@ export interface ShotCounts {
   onTarget: number
 }
 
+export interface PenaltyKick {
+  team: TeamId
+  scored: boolean
+}
+
+/** Live penalty-shootout state. Present on `Match` only once the shootout has started. */
+export interface PenaltyShootout {
+  /** Converted kicks per team. */
+  score: Score
+  /** Every kick in the order taken (best-of-5, then sudden death). */
+  kicks: PenaltyKick[]
+  firstKicker: TeamId
+  /** Set as soon as the shootout is mathematically decided. */
+  winner: TeamId | null
+}
+
 export interface LineupPlayer {
   number: number
   /** Short display name, e.g. "Mbappé". */
@@ -73,13 +106,29 @@ export interface Match {
   kickoffIso: string
   teams: Record<TeamId, Team>
   phase: MatchPhase
-  /** Regulation minute, 0–90. Holds at 45/90 while stoppage time is played. */
+  /**
+   * True for a fixture that must produce a winner: level after 90 goes to
+   * extra time (91–120), still level goes to penalties.
+   */
+  knockout: boolean
+  /**
+   * Match minute, 0–120. Holds at each half's base (45/90/105/120) while
+   * that half's stoppage time is played. Extra time runs 91–105 and 106–120.
+   */
   minute: number
-  /** Minutes played beyond 45'/90' in the current half (0 in open play). */
+  /** Minutes played beyond the current half's base minute (0 in open play). */
   stoppageMinute: number
   /** Fourth-official added time per half; null until announced. */
-  announcedStoppage: { firstHalf: number | null; secondHalf: number | null }
+  announcedStoppage: {
+    firstHalf: number | null
+    secondHalf: number | null
+    extraTimeFirst: number | null
+    extraTimeSecond: number | null
+  }
+  /** Goals in open play — regulation plus extra time, never shootout kicks. */
   score: Score
+  /** Penalty-shootout state; absent until the shootout starts. */
+  penalties?: PenaltyShootout
   redCards: Record<TeamId, number>
   /** Shot counts per team, updated live. Drives the momentum model. */
   shots: Record<TeamId, ShotCounts>

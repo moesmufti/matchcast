@@ -3,6 +3,8 @@ import type {
   Match,
   MatchEvent,
   MatchPhase,
+  PenaltyKick,
+  PenaltyShootout,
   Score,
   ShotCounts,
   Team,
@@ -10,7 +12,15 @@ import type {
   TeamLineup,
 } from '../domain/types'
 import { createInitialMatch } from '../domain/fixture'
-import { effectiveMinute, matchEffectiveMinute } from '../domain/clock'
+import {
+  effectiveMinute,
+  ET_FIRST_END,
+  ET_SECOND_END,
+  HALF_MINUTES,
+  matchEffectiveMinute,
+  REGULATION_MINUTES,
+  isExtraTimePhase,
+} from '../domain/clock'
 import { computeMomentum } from '../domain/momentum'
 import type {
   LiveFeedPayload,
@@ -40,7 +50,12 @@ export interface MapContext {
   previousShots: Record<TeamId, ShotCounts>
   syntheticShotEvents: MatchEvent[]
   syntheticShotCounter: Record<TeamId, number>
-  announcedStoppage: { firstHalf: number | null; secondHalf: number | null }
+  announcedStoppage: {
+    firstHalf: number | null
+    secondHalf: number | null
+    extraTimeFirst: number | null
+    extraTimeSecond: number | null
+  }
 }
 
 export function createInitialContext(): MapContext {
@@ -51,7 +66,12 @@ export function createInitialContext(): MapContext {
     },
     syntheticShotEvents: [],
     syntheticShotCounter: { home: 0, away: 0 },
-    announcedStoppage: { firstHalf: null, secondHalf: null },
+    announcedStoppage: {
+      firstHalf: null,
+      secondHalf: null,
+      extraTimeFirst: null,
+      extraTimeSecond: null,
+    },
   }
 }
 
@@ -81,35 +101,50 @@ export function estimateMinuteFromKickoff(utcDate: string, nowMs: number): numbe
   return Math.min(90, elapsed - 15)
 }
 
+/** Which quarter of the match we're in — first/second half, or the two extra-time periods. */
+type MatchPeriod = 'first' | 'second' | 'et-first' | 'et-second'
+
 /**
  * `score.halfTime` only populates at the interval, so a null half-time score
  * during play reliably means the first half — even when the raw vendor
  * minute has run past 45 into first-half stoppage (m=47 for "45+2").
  * Fall back to the minute heuristic once the half-time score exists.
+ *
+ * For EXTRA_TIME, the raw vendor minute keeps counting through ET1's
+ * stoppage past 105 before the second period officially starts — there's no
+ * separate signal to tell "105+1" apart from "106 exactly", so any m > 105
+ * is read as et-second. Early ET1 stoppage therefore gets misread as
+ * et-second — accepted, same spirit as the m>=46 regulation fallback below.
  */
-function resolveHalf(feed: LiveFeedPayload, minute: number): 'first' | 'second' {
+function resolvePeriod(feed: LiveFeedPayload, minute: number): MatchPeriod {
+  if (feed.status === 'EXTRA_TIME') {
+    return minute > ET_FIRST_END ? 'et-second' : 'et-first'
+  }
   if (feed.status === 'IN_PLAY' && feed.score.halfTime.home === null) return 'first'
   return minute >= 46 ? 'second' : 'first'
 }
 
-function mapPhase(status: VendorMatchStatus, half: 'first' | 'second'): MatchPhase {
+function mapPhase(status: VendorMatchStatus, period: MatchPeriod, minute: number): MatchPhase {
   switch (status) {
     case 'SCHEDULED':
     case 'TIMED':
       return 'pre-match'
     case 'PAUSED':
+      // PAUSED covers the regulation half-time break as well as the short
+      // 90' breather before extra time and the break between the two ET
+      // periods — the minute is the only signal that tells them apart.
+      if (minute >= ET_FIRST_END) return 'extra-time-half-time'
+      if (minute >= REGULATION_MINUTES) return 'extra-time-break'
       return 'half-time'
     case 'FINISHED':
     case 'AWARDED':
       return 'full-time'
     case 'IN_PLAY':
-      return half === 'second' ? 'second-half' : 'first-half'
+      return period === 'second' ? 'second-half' : 'first-half'
     case 'EXTRA_TIME':
+      return period === 'et-second' ? 'extra-time-second' : 'extra-time-first'
     case 'PENALTY_SHOOTOUT':
-      // Extra time / penalties aren't modeled in the domain yet (MatchPhase
-      // has no such state) — fold into second-half so the prediction engine
-      // still renders something sane instead of crashing on an unknown phase.
-      return 'second-half'
+      return 'penalties'
     case 'SUSPENDED':
     case 'POSTPONED':
     case 'CANCELLED':
@@ -125,38 +160,71 @@ function mapPhase(status: VendorMatchStatus, half: 'first' | 'second'): MatchPha
 interface ClockResult {
   minute: number
   stoppageMinute: number
-  announcedStoppage: { firstHalf: number | null; secondHalf: number | null }
+  announcedStoppage: MapContext['announcedStoppage']
+}
+
+type AnnouncedKey = keyof MapContext['announcedStoppage']
+
+/**
+ * Which minute a phase "holds" at while its stoppage plays, and which
+ * one-shot `announcedStoppage` field that stoppage belongs to. `duration`
+ * disambiguates 'full-time', which by itself doesn't say whether the match
+ * finished in regulation, extra time, or on penalties.
+ */
+function clockBase(
+  phase: MatchPhase,
+  duration: LiveFeedPayload['score']['duration'],
+): { base: number; key: AnnouncedKey } {
+  switch (phase) {
+    case 'pre-match':
+    case 'first-half':
+    case 'half-time':
+      return { base: HALF_MINUTES, key: 'firstHalf' }
+    case 'extra-time-break':
+      return { base: REGULATION_MINUTES, key: 'secondHalf' }
+    case 'extra-time-first':
+    case 'extra-time-half-time':
+      return { base: ET_FIRST_END, key: 'extraTimeFirst' }
+    case 'extra-time-second':
+    case 'penalties':
+      return { base: ET_SECOND_END, key: 'extraTimeSecond' }
+    case 'full-time':
+      return duration === 'EXTRA_TIME' || duration === 'PENALTY_SHOOTOUT'
+        ? { base: ET_SECOND_END, key: 'extraTimeSecond' }
+        : { base: REGULATION_MINUTES, key: 'secondHalf' }
+    case 'second-half':
+      return { base: REGULATION_MINUTES, key: 'secondHalf' }
+  }
 }
 
 /**
  * Vendor clock interpretation (deliberately spelled out — this is easy to
  * get backwards):
- *  - Raw vendor `minute` (m) keeps counting up past a half's base time, e.g.
- *    m=93 in the second half means "90+3" has actually been played.
- *  - `injuryTime`, when present at/after the 45'/90' boundary, is the fourth
- *    official's ANNOUNCED total added time for that half (e.g. "5 minutes
+ *  - Raw vendor `minute` (m) keeps counting up past a period's base time,
+ *    e.g. m=93 in the second half means "90+3" has actually been played;
+ *    m=107 in extra time's second period means "105+2".
+ *  - `injuryTime`, when present at/after a period's boundary, is the fourth
+ *    official's ANNOUNCED total added time for that period (e.g. "5 minutes
  *    shown") — not how much of it has been played so far. We record it once
- *    into `announcedStoppage` (for display/prediction) and never let it
- *    drive `stoppageMinute` directly.
+ *    per period into `announcedStoppage` (for display/prediction) and never
+ *    let it drive `stoppageMinute` directly.
  *  - The actually-played stoppage (`stoppageMinute`) always comes from how
- *    far m has gone past the half's base: m - 45 / m - 90 once m exceeds it,
- *    zero otherwise.
+ *    far m has gone past the period's base — zero otherwise.
  */
 function computeClock(
-  half: 'first' | 'second',
+  phase: MatchPhase,
+  duration: LiveFeedPayload['score']['duration'],
   m: number,
   injuryTime: number | null,
-  announced: { firstHalf: number | null; secondHalf: number | null },
+  announced: MapContext['announcedStoppage'],
 ): ClockResult {
-  const base = half === 'first' ? 45 : 90
+  const { base, key } = clockBase(phase, duration)
   const minute = Math.min(m, base)
   const stoppageMinute = m > base ? m - base : 0
 
   const nextAnnounced = { ...announced }
-  if (m >= base && injuryTime !== null) {
-    if (half === 'first' && nextAnnounced.firstHalf === null) nextAnnounced.firstHalf = injuryTime
-    if (half === 'second' && nextAnnounced.secondHalf === null)
-      nextAnnounced.secondHalf = injuryTime
+  if (m >= base && injuryTime !== null && nextAnnounced[key] === null) {
+    nextAnnounced[key] = injuryTime
   }
 
   return { minute, stoppageMinute, announcedStoppage: nextAnnounced }
@@ -195,6 +263,48 @@ function countRedCards(
     counts[booking.team.id === homeTeamId ? 'home' : 'away'] += 1
   }
   return counts
+}
+
+/**
+ * Builds `Match.penalties` once a shootout has started — signalled by the
+ * PENALTY_SHOOTOUT status itself, by `score.penalties` appearing (the vendor
+ * populates it as soon as the shootout is under way), or by a non-empty
+ * kicks array. Returns undefined otherwise so `Match.penalties` stays absent
+ * pre-shootout, per the domain contract.
+ */
+function buildPenalties(feed: LiveFeedPayload, homeTeamId: number): PenaltyShootout | undefined {
+  const kicksInput = feed.penalties ?? []
+  const hasShootout =
+    feed.status === 'PENALTY_SHOOTOUT' ||
+    feed.score.penalties !== undefined ||
+    kicksInput.length > 0
+
+  if (!hasShootout) return undefined
+
+  const kicks: PenaltyKick[] = kicksInput.map((k) => ({
+    team: k.team.id === homeTeamId ? 'home' : 'away',
+    scored: k.scored,
+  }))
+
+  const scoredCount = (team: TeamId) => kicks.filter((k) => k.team === team && k.scored).length
+
+  const score: Score = {
+    home: feed.score.penalties?.home ?? scoredCount('home'),
+    away: feed.score.penalties?.away ?? scoredCount('away'),
+  }
+
+  const firstKicker: TeamId = kicks[0]?.team ?? 'home'
+
+  let winner: TeamId | null = null
+  if (feed.status === 'FINISHED' && feed.score.duration === 'PENALTY_SHOOTOUT') {
+    if (feed.score.winner === 'HOME_TEAM') winner = 'home'
+    else if (feed.score.winner === 'AWAY_TEAM') winner = 'away'
+    // Vendor winner missing/DRAW (shouldn't happen once FINISHED on
+    // penalties) — fall back to whichever side is ahead in the shootout.
+    else winner = score.home > score.away ? 'home' : score.away > score.home ? 'away' : null
+  }
+
+  return { score, kicks, firstKicker, winner }
 }
 
 function toTeamLineup(team: LiveFeedTeam): TeamLineup | undefined {
@@ -304,13 +414,34 @@ export function mapFeedToMatch(
     feed.minute ??
     (feed.status === 'IN_PLAY'
       ? Math.floor(estimateMinuteFromKickoff(feed.utcDate, nowMs))
-      : feed.status === 'FINISHED' || feed.status === 'AWARDED'
-        ? 90
-        : 0)
+      : feed.status === 'EXTRA_TIME'
+        ? // No itemized extra-time heuristic exists yet — clamp the same
+          // rough kickoff-elapsed estimate (which tops out at 90) into
+          // extra time's 91-120 window rather than inventing a new one.
+          Math.min(
+            ET_SECOND_END,
+            Math.max(
+              REGULATION_MINUTES + 1,
+              Math.floor(estimateMinuteFromKickoff(feed.utcDate, nowMs)),
+            ),
+          )
+        : feed.status === 'PENALTY_SHOOTOUT'
+          ? ET_SECOND_END
+          : feed.status === 'FINISHED' || feed.status === 'AWARDED'
+            ? feed.score.duration === 'EXTRA_TIME' || feed.score.duration === 'PENALTY_SHOOTOUT'
+              ? ET_SECOND_END
+              : REGULATION_MINUTES
+            : 0)
 
-  const half = resolveHalf(feed, resolvedMinute)
-  const phase = mapPhase(feed.status, half)
-  const clock = computeClock(half, resolvedMinute, feed.injuryTime, context.announcedStoppage)
+  const period = resolvePeriod(feed, resolvedMinute)
+  const phase = mapPhase(feed.status, period, resolvedMinute)
+  const clock = computeClock(
+    phase,
+    feed.score.duration,
+    resolvedMinute,
+    feed.injuryTime,
+    context.announcedStoppage,
+  )
 
   const homeTeamId = feed.homeTeam.id
   const teams: Record<TeamId, Team> = {
@@ -318,10 +449,14 @@ export function mapFeedToMatch(
     away: buildTeam('away', feed.awayTeam),
   }
 
+  // v4 semantics: `fullTime` includes regulation plus extra time, but never
+  // shootout kicks — exactly what Match.score means, so no extra work here.
   const score: Score = {
     home: feed.score.fullTime.home ?? 0,
     away: feed.score.fullTime.away ?? 0,
   }
+
+  const penalties = buildPenalties(feed, homeTeamId)
 
   const redCards = countRedCards(feed.bookings, homeTeamId)
 
@@ -371,6 +506,21 @@ export function mapFeedToMatch(
     }
   })
 
+  // Reached extra time at all (including the 90' breather before it starts)
+  // — either currently in one of its phases, or the match finished having
+  // gone there.
+  const reachedExtraTime =
+    isExtraTimePhase(phase) ||
+    phase === 'penalties' ||
+    (phase === 'full-time' &&
+      (feed.score.duration === 'EXTRA_TIME' || feed.score.duration === 'PENALTY_SHOOTOUT'))
+  // In or past extra time's second period specifically.
+  const reachedEtSecondOrBeyond =
+    phase === 'extra-time-second' ||
+    phase === 'penalties' ||
+    (phase === 'full-time' &&
+      (feed.score.duration === 'EXTRA_TIME' || feed.score.duration === 'PENALTY_SHOOTOUT'))
+
   const markerEvents: MatchEvent[] = []
   if (hasKickedOff) {
     markerEvents.push({
@@ -384,32 +534,127 @@ export function mapFeedToMatch(
   if (phase === 'half-time') {
     markerEvents.push({
       id: 'half-time',
-      minute: 45,
+      minute: HALF_MINUTES,
       type: 'half-time',
       description: 'Half-time whistle.',
       modelReaction: 'Model holds probabilities steady until the second half resumes.',
     })
   }
-  if (phase === 'second-half' || phase === 'full-time') {
+  if (
+    phase === 'second-half' ||
+    isExtraTimePhase(phase) ||
+    phase === 'penalties' ||
+    phase === 'full-time'
+  ) {
     markerEvents.push({
       id: 'second-half-start',
-      minute: 45,
+      minute: HALF_MINUTES,
       type: 'second-half-start',
       description: 'Second half under way.',
       modelReaction: 'Remaining-time model resets its xG clock for the second 45.',
     })
   }
+  if (reachedExtraTime) {
+    markerEvents.push({
+      id: 'extra-time-start',
+      minute: REGULATION_MINUTES,
+      type: 'extra-time-start',
+      description: 'Extra time under way — 15 minutes each way.',
+      modelReaction:
+        'Model resets the remaining-time clock for extra time and recalculates draw odds for a 30-minute window.',
+    })
+  }
+  if (phase === 'extra-time-half-time' || reachedEtSecondOrBeyond) {
+    markerEvents.push({
+      id: 'extra-time-half-time',
+      minute: ET_FIRST_END,
+      type: 'extra-time-half-time',
+      description: 'End of the first period of extra time.',
+      modelReaction: 'Model holds probabilities steady for the short break.',
+    })
+  }
+  if (reachedEtSecondOrBeyond) {
+    markerEvents.push({
+      id: 'extra-time-second-start',
+      minute: ET_FIRST_END,
+      type: 'extra-time-second-start',
+      description: 'Second period of extra time under way.',
+      modelReaction: 'Model resets the remaining-time clock for the final 15 minutes.',
+    })
+  }
+  if (penalties) {
+    markerEvents.push({
+      id: 'penalties-start',
+      minute: ET_SECOND_END,
+      type: 'penalties-start',
+      description: 'Penalty shootout.',
+      modelReaction:
+        'Model switches to shootout mode — win probability now driven by kicks taken and remaining.',
+    })
+  }
   if (phase === 'full-time') {
+    const suffix =
+      feed.score.duration === 'PENALTY_SHOOTOUT'
+        ? ' on penalties'
+        : feed.score.duration === 'EXTRA_TIME'
+          ? ' after extra time'
+          : ''
     markerEvents.push({
       id: 'full-time',
-      minute: 90,
+      minute:
+        feed.score.duration === 'EXTRA_TIME' || feed.score.duration === 'PENALTY_SHOOTOUT'
+          ? ET_SECOND_END
+          : REGULATION_MINUTES,
       type: 'full-time',
-      description: 'Full-time whistle.',
+      description: `Full-time whistle${suffix}.`,
       modelReaction: 'Result is locked in — probabilities settle at the final outcome.',
     })
   }
 
+  // One event per shootout kick, in the order taken. Padded index keeps the
+  // id-based sort tiebreak correct past kick 9 (sudden death can run long).
+  const penaltyKickEvents: MatchEvent[] = (feed.penalties ?? []).map((k, index) => {
+    const team: TeamId = k.team.id === homeTeamId ? 'home' : 'away'
+    const teamName = teams[team].name
+    const playerSuffix = k.player ? ` (${k.player.name})` : ''
+    return k.scored
+      ? {
+          id: `pen-${String(index).padStart(2, '0')}`,
+          minute: ET_SECOND_END,
+          type: 'penalty-scored',
+          team,
+          description: `Penalty — ${teamName} score${playerSuffix}.`,
+          modelReaction: `${teamName} convert from the spot.`,
+        }
+      : {
+          id: `pen-${String(index).padStart(2, '0')}`,
+          minute: ET_SECOND_END,
+          type: 'penalty-missed',
+          team,
+          description: `Penalty missed — ${teamName}${playerSuffix}.`,
+          modelReaction: `${teamName} miss from the spot — shootout advantage swings to their opponent.`,
+        }
+  })
+
   const shotResult = synthesizeShotEvents(feed, context, teams, clock)
+
+  // Same-minute chronology the id tiebreak alone can't provide: everything
+  // at 120' would otherwise sort alphabetically ('full-time' < 'pen-NN' <
+  // 'penalties-start'). Open play first, then the shootout opens, then its
+  // kicks, and the final whistle always last.
+  const sameMinuteRank = (event: MatchEvent): number => {
+    switch (event.type) {
+      case 'penalties-start':
+        return 1
+      case 'penalty-scored':
+      case 'penalty-missed':
+        return 2
+      case 'full-time':
+        return 3
+      default:
+        return 0
+    }
+  }
 
   const events = [
     ...markerEvents,
@@ -417,10 +662,14 @@ export function mapFeedToMatch(
     ...bookingEvents,
     ...subEvents,
     ...shotResult.syntheticShotEvents,
+    ...penaltyKickEvents,
   ].sort((a, b) => {
     const ea = effectiveMinute(a.minute, a.stoppageMinute ?? 0)
     const eb = effectiveMinute(b.minute, b.stoppageMinute ?? 0)
-    return ea !== eb ? ea - eb : a.id.localeCompare(b.id)
+    if (ea !== eb) return ea - eb
+    const ra = sameMinuteRank(a)
+    const rb = sameMinuteRank(b)
+    return ra !== rb ? ra - rb : a.id.localeCompare(b.id)
   })
 
   const lineups = buildLineups(feed.homeTeam, feed.awayTeam)
@@ -432,10 +681,12 @@ export function mapFeedToMatch(
     kickoffIso: feed.utcDate,
     teams,
     phase,
+    knockout: FIXTURE.knockout,
     minute: clock.minute,
     stoppageMinute: clock.stoppageMinute,
     announcedStoppage: clock.announcedStoppage,
     score,
+    penalties,
     redCards,
     shots: shotResult.shots,
     momentum: { home: 0, away: 0 },

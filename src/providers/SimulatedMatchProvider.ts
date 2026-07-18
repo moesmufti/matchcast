@@ -1,12 +1,31 @@
-import type { Match, MatchEvent, MatchEventType, TeamId } from '../domain/types'
+import type { Match, MatchEvent, MatchEventType, PenaltyKick, Score, TeamId } from '../domain/types'
 import { createInitialMatch, PRE_MATCH_MODEL } from '../domain/fixture'
-import { DEFAULT_STOPPAGE, matchEffectiveMinute } from '../domain/clock'
+import {
+  DEFAULT_STOPPAGE,
+  ET_FIRST_END,
+  ET_SECOND_END,
+  isExtraTimePhase,
+  matchEffectiveMinute,
+} from '../domain/clock'
 import { computeMomentum } from '../domain/momentum'
 import type { LiveMatchProvider, MatchUpdate, SimulationControls } from './LiveMatchProvider'
 
 const HALF_TIME_MINUTE = 45
 const FULL_TIME_MINUTE = 90
 const SUBSTITUTION_MIN_MINUTE = 55
+
+/** Short breaks (extra-time break, ET half-time) last this many ticks. */
+const EXTRA_TIME_BREAK_TICKS = 2
+const ET_HALF_TIME_TICKS = 2
+
+/** Tired legs: shot rate is dampened during extra time. */
+const ET_INTENSITY_FACTOR = 0.9
+
+/** Chance a penalty kick is converted. */
+const PENALTY_CONVERSION = 0.75
+
+/** A shoot-out is best-of-5 per side before sudden death kicks in. */
+const PENALTY_BEST_OF = 5
 
 const SUPPORTED_SPEEDS = [1, 15, 60] as const
 type Speed = (typeof SUPPORTED_SPEEDS)[number]
@@ -63,6 +82,26 @@ const SECOND_HALF_STOPPAGE_WEIGHTS: readonly WeightedOption[] = [
   [6, 20],
   [7, 15],
 ]
+// Extra-time halves are shorter, so the board tends to show less added time.
+const ET_FIRST_STOPPAGE_WEIGHTS: readonly WeightedOption[] = [
+  [0, 25],
+  [1, 45],
+  [2, 30],
+]
+const ET_SECOND_STOPPAGE_WEIGHTS: readonly WeightedOption[] = [
+  [1, 35],
+  [2, 40],
+  [3, 25],
+]
+
+type StoppageHalf = 'firstHalf' | 'secondHalf' | 'extraTimeFirst' | 'extraTimeSecond'
+
+const STOPPAGE_WEIGHTS: Record<StoppageHalf, readonly WeightedOption[]> = {
+  firstHalf: FIRST_HALF_STOPPAGE_WEIGHTS,
+  secondHalf: SECOND_HALF_STOPPAGE_WEIGHTS,
+  extraTimeFirst: ET_FIRST_STOPPAGE_WEIGHTS,
+  extraTimeSecond: ET_SECOND_STOPPAGE_WEIGHTS,
+}
 
 function weightedSample(options: readonly WeightedOption[]): number {
   const total = options.reduce((sum, [, weight]) => sum + weight, 0)
@@ -100,6 +139,8 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
   private running = false
   private eventCounter = 0
   private speed: Speed
+  /** Ticks left in the current short break (extra-time break or ET half-time). */
+  private breakTicksRemaining = 0
 
   constructor(initialSpeed: number = DEFAULT_SPEED) {
     this.speed = isSupportedSpeed(initialSpeed) ? initialSpeed : DEFAULT_SPEED
@@ -147,26 +188,27 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
     this.stopTimer()
     this.running = false
     this.eventCounter = 0
+    this.breakTicksRemaining = 0
     this.match = createInitialMatch()
     this.emit('live')
   }
 
   injectGoal(team: TeamId): void {
-    if (!this.hasStarted()) return
+    if (!this.canInject()) return
     this.recordShot(team, true)
     this.scoreGoal(team, 'A well-worked finish')
     this.emit(this.statusForCurrentState())
   }
 
   injectChance(team: TeamId): void {
-    if (!this.hasStarted()) return
+    if (!this.canInject()) return
     this.recordShot(team, true)
     this.recordShotOnTarget(team, true)
     this.emit(this.statusForCurrentState())
   }
 
   injectRedCard(team: TeamId): void {
-    if (!this.hasStarted()) return
+    if (!this.canInject()) return
     this.sendOff(team)
     this.emit(this.statusForCurrentState())
   }
@@ -201,6 +243,11 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
 
   private hasStarted(): boolean {
     return this.match.phase !== 'pre-match'
+  }
+
+  /** Manual injections only make sense while open play is actually happening. */
+  private canInject(): boolean {
+    return this.hasStarted() && this.match.phase !== 'full-time' && this.match.phase !== 'penalties'
   }
 
   private statusForCurrentState(): MatchUpdate['status'] {
@@ -250,6 +297,31 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
 
     if (this.match.phase === 'second-half') {
       this.tickSecondHalf(allowRandomEvents)
+      return
+    }
+
+    if (this.match.phase === 'extra-time-break') {
+      this.tickExtraTimeBreak()
+      return
+    }
+
+    if (this.match.phase === 'extra-time-first') {
+      this.tickExtraTimeFirst(allowRandomEvents)
+      return
+    }
+
+    if (this.match.phase === 'extra-time-half-time') {
+      this.tickExtraTimeHalfTime()
+      return
+    }
+
+    if (this.match.phase === 'extra-time-second') {
+      this.tickExtraTimeSecond(allowRandomEvents)
+      return
+    }
+
+    if (this.match.phase === 'penalties') {
+      this.tickPenalties()
       return
     }
 
@@ -306,15 +378,216 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
     const playExtraMinute =
       nextStoppageMinute === announced && Math.random() < EXTRA_STOPPAGE_MINUTE_PROBABILITY
     if (nextStoppageMinute >= announced && !playExtraMinute) {
-      this.blowFullTime()
+      if (this.match.knockout && this.match.score.home === this.match.score.away) {
+        this.startExtraTimeBreak()
+      } else {
+        this.blowFullTime()
+      }
     }
   }
 
-  private announceStoppage(half: 'firstHalf' | 'secondHalf'): void {
-    const minutes =
-      half === 'firstHalf'
-        ? weightedSample(FIRST_HALF_STOPPAGE_WEIGHTS)
-        : weightedSample(SECOND_HALF_STOPPAGE_WEIGHTS)
+  private tickExtraTimeBreak(): void {
+    this.breakTicksRemaining -= 1
+    if (this.breakTicksRemaining > 0) return
+
+    this.match = { ...this.match, phase: 'extra-time-first' }
+    this.appendEvent({
+      minute: this.match.minute,
+      type: 'extra-time-start',
+      description: 'Extra time under way.',
+      modelReaction: 'Model resets its clock for 30 more minutes — draw probability drops to zero.',
+    })
+  }
+
+  private tickExtraTimeFirst(allowRandomEvents: boolean): void {
+    if (this.match.minute < ET_FIRST_END) {
+      const nextMinute = Math.min(ET_FIRST_END, this.match.minute + 1)
+      this.match = { ...this.match, minute: nextMinute }
+      if (allowRandomEvents) this.maybeRunAmbientEvents()
+      this.recomputeMomentum()
+
+      if (this.match.minute >= ET_FIRST_END) {
+        this.announceStoppage('extraTimeFirst')
+      }
+      return
+    }
+
+    // Playing ET1 stoppage time: minute holds at 105, stoppageMinute climbs.
+    const nextStoppageMinute = this.match.stoppageMinute + 1
+    this.match = { ...this.match, stoppageMinute: nextStoppageMinute }
+    if (allowRandomEvents) this.maybeRunAmbientEvents()
+    this.recomputeMomentum()
+
+    const announced = this.match.announcedStoppage.extraTimeFirst ?? DEFAULT_STOPPAGE.extraTimeFirst
+    const playExtraMinute =
+      nextStoppageMinute === announced && Math.random() < EXTRA_STOPPAGE_MINUTE_PROBABILITY
+    if (nextStoppageMinute >= announced && !playExtraMinute) {
+      this.blowExtraTimeHalfTime()
+    }
+  }
+
+  private blowExtraTimeHalfTime(): void {
+    this.appendEvent({
+      minute: this.match.minute,
+      stoppageMinute: this.currentStoppageMinute(),
+      type: 'extra-time-half-time',
+      description: 'End of the first period of extra time.',
+      modelReaction: 'Model holds probabilities steady for the short turnaround.',
+    })
+    this.match = { ...this.match, phase: 'extra-time-half-time', stoppageMinute: 0 }
+    this.breakTicksRemaining = ET_HALF_TIME_TICKS
+  }
+
+  private tickExtraTimeHalfTime(): void {
+    this.breakTicksRemaining -= 1
+    if (this.breakTicksRemaining > 0) return
+
+    this.match = { ...this.match, phase: 'extra-time-second' }
+    this.appendEvent({
+      minute: this.match.minute,
+      type: 'extra-time-second-start',
+      description: 'Second period of extra time under way.',
+      modelReaction: 'Model resets its clock for the final 15 minutes.',
+    })
+  }
+
+  private tickExtraTimeSecond(allowRandomEvents: boolean): void {
+    if (this.match.minute < ET_SECOND_END) {
+      const nextMinute = Math.min(ET_SECOND_END, this.match.minute + 1)
+      this.match = { ...this.match, minute: nextMinute }
+      if (allowRandomEvents) this.maybeRunAmbientEvents()
+      this.recomputeMomentum()
+
+      if (this.match.minute >= ET_SECOND_END) {
+        this.announceStoppage('extraTimeSecond')
+      }
+      return
+    }
+
+    // Playing ET2 stoppage time: minute holds at 120, stoppageMinute climbs.
+    const nextStoppageMinute = this.match.stoppageMinute + 1
+    this.match = { ...this.match, stoppageMinute: nextStoppageMinute }
+    if (allowRandomEvents) this.maybeRunAmbientEvents()
+    this.recomputeMomentum()
+
+    const announced =
+      this.match.announcedStoppage.extraTimeSecond ?? DEFAULT_STOPPAGE.extraTimeSecond
+    const playExtraMinute =
+      nextStoppageMinute === announced && Math.random() < EXTRA_STOPPAGE_MINUTE_PROBABILITY
+    if (nextStoppageMinute >= announced && !playExtraMinute) {
+      if (this.match.score.home === this.match.score.away) {
+        this.startPenalties()
+      } else {
+        this.blowFullTimeAfterExtraTime()
+      }
+    }
+  }
+
+  private startExtraTimeBreak(): void {
+    this.appendEvent({
+      minute: this.match.minute,
+      stoppageMinute: this.currentStoppageMinute(),
+      type: 'clock',
+      description: 'Level after 90 — extra time coming.',
+      modelReaction: 'Model holds the draw scenario open — 30 more minutes to separate the sides.',
+    })
+    this.match = { ...this.match, phase: 'extra-time-break', stoppageMinute: 0 }
+    this.breakTicksRemaining = EXTRA_TIME_BREAK_TICKS
+  }
+
+  private startPenalties(): void {
+    this.appendEvent({
+      minute: this.match.minute,
+      type: 'penalties-start',
+      description: 'It goes to penalties.',
+      modelReaction:
+        'Model switches to shoot-out mode — the outcome is now a run of individual kicks.',
+    })
+    this.match = {
+      ...this.match,
+      phase: 'penalties',
+      penalties: { score: { home: 0, away: 0 }, kicks: [], firstKicker: 'home', winner: null },
+    }
+  }
+
+  private tickPenalties(): void {
+    const penalties = this.match.penalties
+    if (!penalties || penalties.winner) return
+
+    const kicker =
+      penalties.kicks.length % 2 === 0 ? penalties.firstKicker : opponent(penalties.firstKicker)
+    const scored = Math.random() < PENALTY_CONVERSION
+    const kicks: PenaltyKick[] = [...penalties.kicks, { team: kicker, scored }]
+    const score: Score = {
+      ...penalties.score,
+      [kicker]: penalties.score[kicker] + (scored ? 1 : 0),
+    }
+    const winner = this.decideShootoutWinner(kicks, score)
+
+    this.match = { ...this.match, penalties: { ...penalties, kicks, score, winner } }
+
+    const teamName = this.match.teams[kicker].name
+    const tally = `${score.home}–${score.away}`
+    this.appendEvent({
+      minute: this.match.minute,
+      type: scored ? 'penalty-scored' : 'penalty-missed',
+      team: kicker,
+      description: scored
+        ? `Penalty — ${teamName} score. ${tally}.`
+        : `Penalty — ${teamName} miss. ${tally}.`,
+      modelReaction: scored
+        ? `${teamName} converts — shoot-out score moves to ${tally}.`
+        : `${teamName} misses — shoot-out score holds at ${tally}.`,
+    })
+
+    if (!winner) return
+
+    const winnerName = this.match.teams[winner].name
+    this.appendEvent({
+      minute: this.match.minute,
+      type: 'full-time',
+      description: `${winnerName} win the shoot-out ${score[winner]}–${score[opponent(winner)]}.`,
+      modelReaction: 'Result is locked in — probabilities settle at the final outcome.',
+    })
+    this.match = { ...this.match, phase: 'full-time' }
+  }
+
+  /**
+   * Best-of-5 first, decided as soon as the trailing side cannot catch up
+   * even scoring every remaining kick in their first 5. Level after 5 each
+   * goes to sudden death, decided after each completed pair.
+   */
+  private decideShootoutWinner(kicks: PenaltyKick[], score: Score): TeamId | null {
+    const homeTaken = kicks.filter((k) => k.team === 'home').length
+    const awayTaken = kicks.filter((k) => k.team === 'away').length
+
+    if (homeTaken <= PENALTY_BEST_OF && awayTaken <= PENALTY_BEST_OF) {
+      const homeRemaining = PENALTY_BEST_OF - homeTaken
+      const awayRemaining = PENALTY_BEST_OF - awayTaken
+      if (score.home > score.away + awayRemaining) return 'home'
+      if (score.away > score.home + homeRemaining) return 'away'
+      return null
+    }
+
+    if (homeTaken === awayTaken && score.home !== score.away) {
+      return score.home > score.away ? 'home' : 'away'
+    }
+    return null
+  }
+
+  private blowFullTimeAfterExtraTime(): void {
+    this.appendEvent({
+      minute: this.match.minute,
+      stoppageMinute: this.currentStoppageMinute(),
+      type: 'full-time',
+      description: 'Full-time whistle after extra time.',
+      modelReaction: 'Result is locked in — probabilities settle at the final outcome.',
+    })
+    this.match = { ...this.match, phase: 'full-time' }
+  }
+
+  private announceStoppage(half: StoppageHalf): void {
+    const minutes = weightedSample(STOPPAGE_WEIGHTS[half])
 
     this.match = {
       ...this.match,
@@ -386,7 +659,9 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
       else if (diff > 0) chaseAdjust = CHASE_LEADING_FACTOR
     }
 
-    return base * redAdjust * momentumAdjust * chaseAdjust
+    const etAdjust = isExtraTimePhase(this.match.phase) ? ET_INTENSITY_FACTOR : 1
+
+    return base * redAdjust * momentumAdjust * chaseAdjust * etAdjust
   }
 
   private takeShot(team: TeamId): void {
@@ -606,6 +881,13 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
       announcedStoppage: { ...this.match.announcedStoppage },
       momentum: { ...this.match.momentum },
       events: this.match.events.map((e) => ({ ...e })),
+      penalties: this.match.penalties
+        ? {
+            ...this.match.penalties,
+            score: { ...this.match.penalties.score },
+            kicks: this.match.penalties.kicks.map((k) => ({ ...k })),
+          }
+        : undefined,
     }
   }
 

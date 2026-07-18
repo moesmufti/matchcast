@@ -12,6 +12,12 @@ const ICONS: Record<MatchEventType, string> = {
   'stoppage-announced': '➕',
   'half-time': '⏱',
   'second-half-start': '⏱',
+  'extra-time-start': '⏱',
+  'extra-time-half-time': '⏱',
+  'extra-time-second-start': '⏱',
+  'penalties-start': '🥅',
+  'penalty-scored': '⚽',
+  'penalty-missed': '❌',
   'full-time': '⏱',
   clock: '⏱',
 }

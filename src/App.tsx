@@ -49,6 +49,7 @@ function Dashboard({ provider }: DashboardProps) {
         <div className="broadcast">
           <MatchHeader match={match} />
           <ProbabilityBars
+            match={match}
             prediction={prediction}
             homeName={match.teams.home.name}
             awayName={match.teams.away.name}

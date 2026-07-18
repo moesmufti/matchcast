@@ -5,7 +5,8 @@ import { computePrediction } from '../domain/prediction'
 import { matchEffectiveMinute } from '../domain/clock'
 import type { LiveMatchProvider } from '../providers/LiveMatchProvider'
 
-const MAX_HISTORY = 120
+// 120 regulation minutes + stoppage + extra time + shootout snapshots.
+const MAX_HISTORY = 200
 
 interface LiveMatchState {
   match: Match | null

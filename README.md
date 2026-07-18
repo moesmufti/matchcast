@@ -14,15 +14,19 @@ worker/index.ts                  Hono app on Cloudflare Workers — serves /api/
                                  shared vendor cache, and match-id discovery.
 
 src/domain/types.ts              Typed domain models: Match (incl. stoppage clock,
-                                 shot counts), Team, MatchEvent, PredictionState, ...
+                                 shot counts, knockout flag, penalty-shootout state),
+                                 Team, MatchEvent, PredictionState, ...
 src/domain/fixture.ts            Pre-match priors + initial match state for this fixture.
-src/domain/clock.ts              Stoppage-aware clock helpers ("45+2'", effective
-                                 minutes, expected added time). Pure.
+src/domain/clock.ts              Stoppage-aware clock helpers ("45+2'", "105+1'",
+                                 effective minutes, expected added time across
+                                 regulation and extra time). Pure.
 src/domain/momentum.ts           Shot-based momentum: recency-weighted sum of recent
                                  shots/goals per team. Pure, deterministic. Unit-tested.
 src/domain/prediction.ts         Pure, deterministic prediction engine (Poisson model
                                  over remaining xG, adjusted for score, stoppage-aware
-                                 clock, red cards, momentum). No I/O, no randomness.
+                                 clock, red cards, momentum; extra-time regime and a
+                                 kick-by-kick penalty-shootout win-probability model
+                                 for knockout fixtures). No I/O, no randomness.
 src/domain/feed.ts               Types for the trimmed vendor payload the worker
                                  returns to the browser (no runtime code).
 
@@ -30,11 +34,14 @@ src/providers/LiveMatchProvider.ts   Source-agnostic provider contract + optiona
                                      SimulationControls capability interface.
 src/providers/SimulatedMatchProvider.ts  Realistic simulation: shot-driven goals
                                          calibrated to the pre-match xG, announced
-                                         stoppage time, speed control (1×/15×/60×),
-                                         manual event injection.
+                                         stoppage time, extra time and a kick-by-kick
+                                         penalty shoot-out when a knockout match is
+                                         level, speed control (1×/15×/60×), manual
+                                         event injection.
 src/providers/ApiMatchProvider.ts        Real polling client for /api/match: maps the
-                                         vendor feed to the domain Match (clock,
-                                         events, red cards, lineups), synthesizes
+                                         vendor feed to the domain Match (clock incl.
+                                         extra time, events, red cards, lineups,
+                                         penalty shoot-out state), synthesizes
                                          shot events from shot-count deltas so live
                                          momentum stays shot-based.
 
@@ -96,8 +103,9 @@ any number of viewers stay within the free tier's 10 requests/min.
 
 ## Known limitations
 
-- Extra time and penalty shoot-outs aren't modeled: vendor statuses
-  `EXTRA_TIME`/`PENALTY_SHOOTOUT` are folded into a late second half.
+- BTTS and over-2.5 track the whole match including extra time (shoot-out
+  kicks never count as goals) — they don't follow the 90-minute betting-market
+  settlement convention.
 - The free vendor tier may delay live scores slightly, and per-team shot
   statistics (which feed live momentum) may be tier-gated — without them,
   live momentum rides on goals only.

@@ -14,6 +14,14 @@ export function ModelSnapshot({ match, prediction }: ModelSnapshotProps) {
     <div className="snapshot">
       <h2 className="card-eyebrow">Model snapshot</h2>
       <dl className="snapshot__rows">
+        {match.phase === 'penalties' && match.penalties && (
+          <div className="snapshot__row">
+            <dt>Shoot-out</dt>
+            <dd>
+              {home.name} {match.penalties.score.home}–{match.penalties.score.away} {away.name}
+            </dd>
+          </div>
+        )}
         <div className="snapshot__row">
           <dt>Projected score</dt>
           <dd>

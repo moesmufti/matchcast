@@ -6,6 +6,11 @@ const PHASE_LABEL: Record<MatchPhase, string> = {
   'first-half': 'First half',
   'half-time': 'Half-time',
   'second-half': 'Second half',
+  'extra-time-break': 'Extra time — break',
+  'extra-time-first': 'Extra time, first half',
+  'extra-time-half-time': 'Extra time — half-time',
+  'extra-time-second': 'Extra time, second half',
+  penalties: 'Penalty shoot-out',
   'full-time': 'Full-time model',
 }
 
@@ -41,12 +46,27 @@ function formatKickoffLine(match: Match): string {
   return `${weekday} ${day} ${month} ${year} · ${time} CEST · ${match.venue}`
 }
 
+/** Score line for screen readers — folds in the shoot-out tally and winner once a shootout exists. */
+function buildScoreLabel(match: Match): string {
+  const { home, away } = match.teams
+  const base = `Score: ${home.name} ${match.score.home}, ${away.name} ${match.score.away}`
+  if (!match.penalties) return base
+  const pens = `Penalties: ${home.name} ${match.penalties.score.home}, ${away.name} ${match.penalties.score.away}`
+  const winner = match.penalties.winner
+    ? ` — ${match.teams[match.penalties.winner].name} win the shoot-out`
+    : ''
+  return `${base}. ${pens}${winner}`
+}
+
 interface MatchHeaderProps {
   match: Match
 }
 
 export function MatchHeader({ match }: MatchHeaderProps) {
   const { home, away } = match.teams
+  // The match clock stops meaning anything once kicks start — the phase label
+  // ("Penalty shoot-out") carries the state instead of a frozen "120'".
+  const clockLabel = match.phase === 'penalties' ? 'FT' : formatMatchMinute(match)
 
   return (
     <section className="hero" aria-label="Match overview">
@@ -63,14 +83,16 @@ export function MatchHeader({ match }: MatchHeaderProps) {
           <span className="hero__team-tagline">{home.tagline}</span>
         </div>
         <div className="hero__center">
-          <div
-            className="hero__score"
-            aria-label={`Score: ${home.name} ${match.score.home}, ${away.name} ${match.score.away}`}
-          >
+          <div className="hero__score" aria-label={buildScoreLabel(match)}>
             {match.score.home}–{match.score.away}
           </div>
+          {match.penalties && (
+            <div className="hero__pens" aria-hidden="true">
+              Pens {match.penalties.score.home}–{match.penalties.score.away}
+            </div>
+          )}
           <div className="hero__bug">
-            <span className="hero__clock">{formatMatchMinute(match)}</span>
+            <span className="hero__clock">{clockLabel}</span>
             <span className="hero__phase">{PHASE_LABEL[match.phase]}</span>
           </div>
         </div>
