@@ -67,7 +67,12 @@ function layoutTeam(lineup: TeamLineup, side: 'home' | 'away'): PositionedPlayer
   return positioned
 }
 
-function TeamLabel({ teamId, flag, shortName, formation }: {
+function TeamLabel({
+  teamId,
+  flag,
+  shortName,
+  formation,
+}: {
   teamId: TeamId
   flag: string
   shortName: string
@@ -110,14 +115,7 @@ export function LineupCard({ teams, lineups }: LineupCardProps) {
           aria-label={`Starting line-ups: ${teams.home.name} in a ${lineups.home.formation}, ${teams.away.name} in a ${lineups.away.formation}`}
         >
           <title>Starting line-ups</title>
-          <rect
-            className="lineups__field"
-            x={0}
-            y={0}
-            width={WIDTH}
-            height={HEIGHT}
-            rx={8}
-          />
+          <rect className="lineups__field" x={0} y={0} width={WIDTH} height={HEIGHT} rx={8} />
           <g className="lineups__markings">
             <rect
               x={FIELD_LEFT}
@@ -133,20 +131,29 @@ export function LineupCard({ teams, lineups }: LineupCardProps) {
             <rect x={82} y={HEIGHT - 80} width={176} height={70} fill="none" />
             <rect x={130} y={HEIGHT - 34} width={80} height={24} fill="none" />
             <circle className="lineups__spot" cx={WIDTH / 2} cy={HEIGHT - 66} r={2} />
-            <path
-              d={`M ${140} ${HEIGHT - 80} A 45 45 0 0 1 ${200} ${HEIGHT - 80}`}
-              fill="none"
-            />
+            <path d={`M ${140} ${HEIGHT - 80} A 45 45 0 0 1 ${200} ${HEIGHT - 80}`} fill="none" />
             {/* Top (away) penalty area */}
             <rect x={82} y={10} width={176} height={70} fill="none" />
             <rect x={130} y={10} width={80} height={24} fill="none" />
             <circle className="lineups__spot" cx={WIDTH / 2} cy={66} r={2} />
             <path d={`M ${140} ${80} A 45 45 0 0 0 ${200} ${80}`} fill="none" />
             {/* Corner arcs */}
-            <path d={`M ${FIELD_LEFT} ${FIELD_MARGIN + 8} A 8 8 0 0 0 ${FIELD_LEFT + 8} ${FIELD_MARGIN}`} fill="none" />
-            <path d={`M ${FIELD_RIGHT - 8} ${FIELD_MARGIN} A 8 8 0 0 0 ${FIELD_RIGHT} ${FIELD_MARGIN + 8}`} fill="none" />
-            <path d={`M ${FIELD_LEFT} ${HEIGHT - FIELD_MARGIN - 8} A 8 8 0 0 1 ${FIELD_LEFT + 8} ${HEIGHT - FIELD_MARGIN}`} fill="none" />
-            <path d={`M ${FIELD_RIGHT - 8} ${HEIGHT - FIELD_MARGIN} A 8 8 0 0 1 ${FIELD_RIGHT} ${HEIGHT - FIELD_MARGIN - 8}`} fill="none" />
+            <path
+              d={`M ${FIELD_LEFT} ${FIELD_MARGIN + 8} A 8 8 0 0 0 ${FIELD_LEFT + 8} ${FIELD_MARGIN}`}
+              fill="none"
+            />
+            <path
+              d={`M ${FIELD_RIGHT - 8} ${FIELD_MARGIN} A 8 8 0 0 0 ${FIELD_RIGHT} ${FIELD_MARGIN + 8}`}
+              fill="none"
+            />
+            <path
+              d={`M ${FIELD_LEFT} ${HEIGHT - FIELD_MARGIN - 8} A 8 8 0 0 1 ${FIELD_LEFT + 8} ${HEIGHT - FIELD_MARGIN}`}
+              fill="none"
+            />
+            <path
+              d={`M ${FIELD_RIGHT - 8} ${HEIGHT - FIELD_MARGIN} A 8 8 0 0 1 ${FIELD_RIGHT} ${HEIGHT - FIELD_MARGIN - 8}`}
+              fill="none"
+            />
           </g>
           <g className="lineups__team lineups__team--away">
             {awayPlayers.map((p) => (
