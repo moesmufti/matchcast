@@ -32,12 +32,13 @@ const VENDOR_BASE = 'https://api.football-data.org/v4'
 
 // football-data.org's free tier allows 10 requests/minute. Every polling
 // browser tab would otherwise burn its own request every 15s; instead we
-// memoize the vendor's match body for 10s per Worker isolate, so an
-// arbitrary number of clients collapse into ~6 vendor calls/min from that
-// isolate. Cloudflare may run several isolates concurrently, each with its
-// own cache — a soft, best-effort throttle rather than a hard global limit,
-// but comfortably inside the 10 req/min budget in practice.
-const VENDOR_CACHE_TTL_MS = 10_000
+// memoize the vendor's match body per fixture for 15s per Worker isolate,
+// so an arbitrary number of clients collapse into ~4 vendor calls/min per
+// fixture — ~8/min when both selectable fixtures are being watched, still
+// inside the budget. Cloudflare may run several isolates concurrently, each
+// with its own cache — a soft, best-effort throttle rather than a hard
+// global limit, but comfortably inside the budget in practice.
+const VENDOR_CACHE_TTL_MS = 15_000
 
 interface VendorCacheEntry {
   fetchedAt: number
