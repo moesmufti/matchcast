@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createInitialContext, mapFeedToMatch } from './ApiMatchProvider'
+import { createInitialFinalMatch } from '../domain/fixture'
 import type { LiveFeedPayload, LiveFeedTeam } from '../domain/feed'
 
 const KICKOFF_ISO = '2026-07-18T21:00:00Z'
@@ -378,6 +379,28 @@ describe('mapFeedToMatch', () => {
     ).match
     expect(etHalfTime.phase).toBe('extra-time-half-time')
     expect(etHalfTime.minute).toBe(105)
+  })
+
+  it('maps against a supplied fixture (the final), preserving its teams, round and fallback line-ups', () => {
+    const feed = baseFeed({
+      status: 'TIMED',
+      homeTeam: team(10, 'Spain'),
+      awayTeam: team(11, 'Argentina'),
+    })
+
+    const { match } = mapFeedToMatch(
+      feed,
+      createInitialContext(),
+      NOW_MS,
+      createInitialFinalMatch(),
+    )
+
+    expect(match.round).toBe('Final')
+    expect(match.teams.home.flag).toBe('🇪🇸')
+    expect(match.teams.away.tagline).toBe('Defending champions')
+    expect(match.lineups?.home.predicted).toBe(true)
+    expect(match.lineups?.home.players.map((p) => p.name)).toContain('Yamal')
+    expect(match.lineups?.away.players.map((p) => p.name)).toContain('Messi')
   })
 
   it('maps FINISHED to full-time', () => {

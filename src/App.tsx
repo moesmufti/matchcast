@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ConnectionStatus } from './domain/types'
+import { DEFAULT_FIXTURE_ID, FIXTURES, isFixtureId, type FixtureId } from './domain/fixture'
 import { useLiveMatch } from './state/useLiveMatch'
 import { SimulatedMatchProvider } from './providers/SimulatedMatchProvider'
 import { ApiMatchProvider } from './providers/ApiMatchProvider'
@@ -23,10 +24,15 @@ const NOTICE_COPY: Partial<Record<ConnectionStatus, string>> = {
 
 interface DashboardProps {
   provider: LiveMatchProvider
+  fixtureId: FixtureId
+  onFixtureChange: (fixtureId: FixtureId) => void
 }
 
-function Dashboard({ provider }: DashboardProps) {
-  const { match, status, prediction, history } = useLiveMatch(provider)
+function Dashboard({ provider, fixtureId, onFixtureChange }: DashboardProps) {
+  const { match, status, prediction, history } = useLiveMatch(
+    provider,
+    FIXTURES[fixtureId].preMatchModel,
+  )
 
   if (!match || !prediction) {
     return (
@@ -40,7 +46,7 @@ function Dashboard({ provider }: DashboardProps) {
 
   return (
     <div className="app">
-      <TopBar status={status} />
+      <TopBar status={status} fixtureId={fixtureId} onFixtureChange={onFixtureChange} />
       <main className="app__main">
         {notice && (
           <div className="notice" role="status">
@@ -78,31 +84,41 @@ function Dashboard({ provider }: DashboardProps) {
  *    when `liveConfigured` is true, falling back to the simulator (including
  *    on a failed health check — e.g. offline dev, worker not running).
  */
-async function chooseProvider(): Promise<LiveMatchProvider> {
+async function chooseProvider(fixtureId: FixtureId): Promise<LiveMatchProvider> {
+  const fixture = FIXTURES[fixtureId]
   const params = new URLSearchParams(window.location.search)
   const source = params.get('source')
 
-  if (source === 'sim') return new SimulatedMatchProvider()
-  if (source === 'live') return new ApiMatchProvider()
+  if (source === 'sim') return new SimulatedMatchProvider(undefined, fixture)
+  if (source === 'live') return new ApiMatchProvider('', fixture)
 
   try {
     const response = await fetch('/api/health')
-    if (!response.ok) return new SimulatedMatchProvider()
+    if (!response.ok) return new SimulatedMatchProvider(undefined, fixture)
     const body = (await response.json()) as { ok: boolean; liveConfigured?: boolean }
-    return body.liveConfigured ? new ApiMatchProvider() : new SimulatedMatchProvider()
+    return body.liveConfigured
+      ? new ApiMatchProvider('', fixture)
+      : new SimulatedMatchProvider(undefined, fixture)
   } catch {
-    return new SimulatedMatchProvider()
+    return new SimulatedMatchProvider(undefined, fixture)
   }
 }
 
+/** Initial selection: honour ?fixture=… in the URL, else the default match. */
+function initialFixtureId(): FixtureId {
+  const param = new URLSearchParams(window.location.search).get('fixture')
+  return isFixtureId(param) ? param : DEFAULT_FIXTURE_ID
+}
+
 export default function App() {
+  const [fixtureId, setFixtureId] = useState<FixtureId>(initialFixtureId)
   const [provider, setProvider] = useState<LiveMatchProvider | null>(null)
 
   useEffect(() => {
     let cancelled = false
     let created: LiveMatchProvider | null = null
 
-    void chooseProvider().then((chosen) => {
+    void chooseProvider(fixtureId).then((chosen) => {
       if (cancelled) {
         chosen.dispose()
         return
@@ -115,7 +131,7 @@ export default function App() {
       cancelled = true
       created?.dispose()
     }
-  }, [])
+  }, [fixtureId])
 
   if (!provider) {
     return (
@@ -125,5 +141,5 @@ export default function App() {
     )
   }
 
-  return <Dashboard provider={provider} />
+  return <Dashboard provider={provider} fixtureId={fixtureId} onFixtureChange={setFixtureId} />
 }

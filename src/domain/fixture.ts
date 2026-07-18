@@ -1,5 +1,18 @@
 import type { Match, PreMatchModel } from './types'
 
+export type FixtureId = 'third-place' | 'final'
+
+/** Everything the app needs to drive one selectable fixture. */
+export interface FixtureConfig {
+  id: FixtureId
+  /** Dropdown label in the top bar. */
+  label: string
+  /** football-data.org discovery stage for the worker proxy. */
+  vendorStage: 'THIRD_PLACE' | 'FINAL'
+  preMatchModel: PreMatchModel
+  createInitialMatch: () => Match
+}
+
 /** Pre-match priors for France vs England, third-place match. */
 export const PRE_MATCH_MODEL: PreMatchModel = {
   homeWin: 51,
@@ -125,4 +138,121 @@ export function createInitialMatch(): Match {
       },
     },
   }
+}
+
+/** Pre-match priors for Spain vs Argentina, the final. */
+export const FINAL_PRE_MATCH_MODEL: PreMatchModel = {
+  homeWin: 39,
+  draw: 27,
+  awayWin: 34,
+  xgHome: 1.35,
+  xgAway: 1.2,
+  projectedScore: { home: 1, away: 1 },
+  btts: 52,
+  over25: 47,
+}
+
+export function createInitialFinalMatch(): Match {
+  return {
+    competition: 'FIFA World Cup',
+    round: 'Final',
+    venue: 'MetLife Stadium',
+    kickoffIso: '2026-07-19T21:00:00+02:00',
+    teams: {
+      home: {
+        id: 'home',
+        name: 'Spain',
+        shortName: 'ESP',
+        flag: '🇪🇸',
+        tagline: 'European champions',
+      },
+      away: {
+        id: 'away',
+        name: 'Argentina',
+        shortName: 'ARG',
+        flag: '🇦🇷',
+        tagline: 'Defending champions',
+      },
+    },
+    phase: 'pre-match',
+    knockout: true,
+    minute: 0,
+    stoppageMinute: 0,
+    announcedStoppage: {
+      firstHalf: null,
+      secondHalf: null,
+      extraTimeFirst: null,
+      extraTimeSecond: null,
+    },
+    score: { home: 0, away: 0 },
+    redCards: { home: 0, away: 0 },
+    shots: {
+      home: { total: 0, onTarget: 0 },
+      away: { total: 0, onTarget: 0 },
+    },
+    momentum: { home: 0, away: 0 },
+    events: [],
+    // Editorial predicted XIs until the real teams are announced — the
+    // `predicted` flag titles the card accordingly, and vendor line-ups
+    // replace these wholesale when the feed provides them.
+    lineups: {
+      home: {
+        predicted: true,
+        formation: '4-3-3',
+        players: [
+          { number: 0, name: 'Unai Simón' },
+          { number: 0, name: 'Carvajal' },
+          { number: 0, name: 'Le Normand' },
+          { number: 0, name: 'Cubarsí' },
+          { number: 0, name: 'Cucurella' },
+          { number: 0, name: 'Rodri' },
+          { number: 0, name: 'Pedri' },
+          { number: 0, name: 'Fabián Ruiz' },
+          { number: 0, name: 'Yamal' },
+          { number: 0, name: 'Oyarzabal' },
+          { number: 0, name: 'N. Williams' },
+        ],
+      },
+      away: {
+        predicted: true,
+        formation: '4-3-3',
+        players: [
+          { number: 0, name: 'E. Martínez' },
+          { number: 0, name: 'Molina' },
+          { number: 0, name: 'Romero' },
+          { number: 0, name: 'L. Martínez' },
+          { number: 0, name: 'Tagliafico' },
+          { number: 0, name: 'De Paul' },
+          { number: 0, name: 'E. Fernández' },
+          { number: 0, name: 'Mac Allister' },
+          { number: 0, name: 'Messi' },
+          { number: 0, name: 'J. Álvarez' },
+          { number: 0, name: 'N. González' },
+        ],
+      },
+    },
+  }
+}
+
+export const DEFAULT_FIXTURE_ID: FixtureId = 'third-place'
+
+export const FIXTURES: Record<FixtureId, FixtureConfig> = {
+  'third-place': {
+    id: 'third-place',
+    label: 'Third place · France v England',
+    vendorStage: 'THIRD_PLACE',
+    preMatchModel: PRE_MATCH_MODEL,
+    createInitialMatch,
+  },
+  final: {
+    id: 'final',
+    label: 'Final · Spain v Argentina',
+    vendorStage: 'FINAL',
+    preMatchModel: FINAL_PRE_MATCH_MODEL,
+    createInitialMatch: createInitialFinalMatch,
+  },
+}
+
+export function isFixtureId(value: string | null): value is FixtureId {
+  return value === 'third-place' || value === 'final'
 }

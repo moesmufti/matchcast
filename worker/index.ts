@@ -44,18 +44,28 @@ interface VendorCacheEntry {
   body: VendorMatchBody
 }
 
-// Module-level state persists for the lifetime of a Worker isolate (not
-// across isolates/deploys) — fine for memoizing a single live fixture's id
-// and the last vendor response.
-let discoveredMatchId: string | null = null
-let vendorCache: VendorCacheEntry | null = null
-
 // Head-to-head is static for the life of a fixture, so one successful vendor
 // call serves the whole isolate. Failures back off for a cooldown rather than
 // piggybacking a doomed extra request onto every poll.
 const H2H_RETRY_COOLDOWN_MS = 5 * 60_000
-let h2hCache: LiveFeedHead2Head | null = null
-let h2hLastFailedAt = 0
+
+/** The two fixtures this app serves, keyed by the client's ?fixture= value. */
+type FixtureStage = 'THIRD_PLACE' | 'FINAL'
+
+interface StageState {
+  discoveredMatchId: string | null
+  vendorCache: VendorCacheEntry | null
+  h2hCache: LiveFeedHead2Head | null
+  h2hLastFailedAt: number
+}
+
+// Module-level state persists for the lifetime of a Worker isolate (not
+// across isolates/deploys) — fine for memoizing each fixture's match id
+// and last vendor response.
+const stageState: Record<FixtureStage, StageState> = {
+  THIRD_PLACE: { discoveredMatchId: null, vendorCache: null, h2hCache: null, h2hLastFailedAt: 0 },
+  FINAL: { discoveredMatchId: null, vendorCache: null, h2hCache: null, h2hLastFailedAt: 0 },
+}
 
 // --- raw vendor shapes (football-data.org v4) ------------------------------
 
@@ -176,16 +186,23 @@ async function vendorFetch(path: string, apiKey: string): Promise<Response> {
 }
 
 /** Resolve the football-data.org match id: pinned var, memoized discovery, or a fresh lookup. */
-async function resolveMatchId(pinned: string | undefined, apiKey: string): Promise<string | null> {
-  if (pinned) return pinned
-  if (discoveredMatchId) return discoveredMatchId
+async function resolveMatchId(
+  pinned: string | undefined,
+  apiKey: string,
+  stage: FixtureStage,
+): Promise<string | null> {
+  // The pin var predates fixture selection and refers to the third-place
+  // match — never apply it to the final.
+  if (pinned && stage === 'THIRD_PLACE') return pinned
+  const state = stageState[stage]
+  if (state.discoveredMatchId) return state.discoveredMatchId
 
   const now = new Date()
   const dateFrom = isoDate(new Date(now.getTime() - 24 * 60 * 60 * 1000))
   const dateTo = isoDate(new Date(now.getTime() + 24 * 60 * 60 * 1000))
 
   const res = await vendorFetch(
-    `/matches?competitions=WC&stage=THIRD_PLACE&dateFrom=${dateFrom}&dateTo=${dateTo}`,
+    `/matches?competitions=WC&stage=${stage}&dateFrom=${dateFrom}&dateTo=${dateTo}`,
     apiKey,
   )
   if (!res.ok) {
@@ -195,15 +212,19 @@ async function resolveMatchId(pinned: string | undefined, apiKey: string): Promi
   const match = body.matches?.[0]
   if (!match) return null
 
-  discoveredMatchId = String(match.id)
-  return discoveredMatchId
+  state.discoveredMatchId = String(match.id)
+  return state.discoveredMatchId
 }
 
 /** Fetch the match body, sharing one vendor call across all pollers for `VENDOR_CACHE_TTL_MS`. */
-async function fetchMatchBody(matchId: string, apiKey: string): Promise<VendorMatchBody> {
+async function fetchMatchBody(
+  matchId: string,
+  apiKey: string,
+  state: StageState,
+): Promise<VendorMatchBody> {
   const now = Date.now()
-  if (vendorCache && now - vendorCache.fetchedAt < VENDOR_CACHE_TTL_MS) {
-    return vendorCache.body
+  if (state.vendorCache && now - state.vendorCache.fetchedAt < VENDOR_CACHE_TTL_MS) {
+    return state.vendorCache.body
   }
 
   const res = await vendorFetch(`/matches/${matchId}`, apiKey)
@@ -211,7 +232,7 @@ async function fetchMatchBody(matchId: string, apiKey: string): Promise<VendorMa
     throw new Error(`Vendor match fetch failed with status ${res.status}.`)
   }
   const body = (await res.json()) as VendorMatchBody
-  vendorCache = { fetchedAt: now, body }
+  state.vendorCache = { fetchedAt: now, body }
   return body
 }
 
@@ -220,9 +241,13 @@ async function fetchMatchBody(matchId: string, apiKey: string): Promise<VendorMa
  * endpoint). Best-effort: any failure returns undefined and the match payload
  * simply omits the block.
  */
-async function fetchHead2Head(matchId: string, apiKey: string): Promise<LiveFeedHead2Head | null> {
-  if (h2hCache) return h2hCache
-  if (Date.now() - h2hLastFailedAt < H2H_RETRY_COOLDOWN_MS) return null
+async function fetchHead2Head(
+  matchId: string,
+  apiKey: string,
+  state: StageState,
+): Promise<LiveFeedHead2Head | null> {
+  if (state.h2hCache) return state.h2hCache
+  if (Date.now() - state.h2hLastFailedAt < H2H_RETRY_COOLDOWN_MS) return null
 
   try {
     const res = await vendorFetch(`/matches/${matchId}/head2head?limit=100`, apiKey)
@@ -231,16 +256,16 @@ async function fetchHead2Head(matchId: string, apiKey: string): Promise<LiveFeed
     const agg = body.aggregates
     if (!agg) throw new Error('Vendor head2head response has no aggregates.')
 
-    h2hCache = {
+    state.h2hCache = {
       played: agg.numberOfMatches,
       totalGoals: agg.totalGoals,
       homeWins: agg.homeTeam.wins,
       draws: agg.homeTeam.draws,
       awayWins: agg.awayTeam.wins,
     }
-    return h2hCache
+    return state.h2hCache
   } catch {
-    h2hLastFailedAt = Date.now()
+    state.h2hLastFailedAt = Date.now()
     return null
   }
 }
@@ -378,17 +403,26 @@ app.get('/api/match', async (c) => {
     )
   }
 
+  // Which fixture to serve: ?fixture=final for the final, anything else
+  // (including absent — older clients) falls back to the third-place match.
+  const stage: FixtureStage = c.req.query('fixture') === 'final' ? 'FINAL' : 'THIRD_PLACE'
+  const state = stageState[stage]
+
   try {
-    const matchId = await resolveMatchId(c.env.SPORTS_MATCH_ID, apiKey)
+    const matchId = await resolveMatchId(c.env.SPORTS_MATCH_ID, apiKey, stage)
     if (!matchId) {
       return c.json<LiveFeedResponse>(
-        { configured: true, ok: false, error: 'No World Cup third-place match found for today.' },
+        {
+          configured: true,
+          ok: false,
+          error: `No World Cup ${stage === 'FINAL' ? 'final' : 'third-place match'} found for today.`,
+        },
         404,
       )
     }
 
-    const vendorBody = await fetchMatchBody(matchId, apiKey)
-    const head2head = await fetchHead2Head(matchId, apiKey)
+    const vendorBody = await fetchMatchBody(matchId, apiKey, state)
+    const head2head = await fetchHead2Head(matchId, apiKey, state)
     const feed = toFeedPayload(vendorBody, head2head)
 
     c.header('Cache-Control', 'no-store')

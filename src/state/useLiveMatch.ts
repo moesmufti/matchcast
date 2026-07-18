@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import type { ConnectionStatus, Match, PredictionState, ProbabilitySnapshot } from '../domain/types'
+import type {
+  ConnectionStatus,
+  Match,
+  PredictionState,
+  PreMatchModel,
+  ProbabilitySnapshot,
+} from '../domain/types'
 import { PRE_MATCH_MODEL } from '../domain/fixture'
 import { computePrediction } from '../domain/prediction'
 import { matchEffectiveMinute } from '../domain/clock'
@@ -31,13 +37,19 @@ function isSnapshotEqual(a: ProbabilitySnapshot, b: ProbabilitySnapshot): boolea
  * the raw match/status, the memoized prediction for the current match, and a
  * capped history of probability snapshots for the momentum chart.
  */
-export function useLiveMatch(provider: LiveMatchProvider): LiveMatchState {
+export function useLiveMatch(
+  provider: LiveMatchProvider,
+  preMatchModel: PreMatchModel = PRE_MATCH_MODEL,
+): LiveMatchState {
   const [state, setState] = useState<LiveMatchState>(INITIAL_STATE)
 
   useEffect(() => {
+    // A provider swap (fixture change) starts from a clean slate so one
+    // match's history never bleeds into another's chart.
+    setState(INITIAL_STATE)
     const unsubscribe = provider.subscribe(({ match, status }) => {
       setState((prev) => {
-        const prediction = computePrediction(match, PRE_MATCH_MODEL)
+        const prediction = computePrediction(match, preMatchModel)
         const snapshot: ProbabilitySnapshot = {
           minute: matchEffectiveMinute(match),
           home: prediction.probabilities.home,
@@ -63,7 +75,7 @@ export function useLiveMatch(provider: LiveMatchProvider): LiveMatchState {
       unsubscribe()
       provider.dispose()
     }
-  }, [provider])
+  }, [provider, preMatchModel])
 
   return state
 }

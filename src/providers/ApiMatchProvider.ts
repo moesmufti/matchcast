@@ -11,7 +11,12 @@ import type {
   TeamId,
   TeamLineup,
 } from '../domain/types'
-import { createInitialMatch } from '../domain/fixture'
+import {
+  createInitialMatch,
+  DEFAULT_FIXTURE_ID,
+  FIXTURES,
+  type FixtureConfig,
+} from '../domain/fixture'
 import {
   effectiveMinute,
   ET_FIRST_END,
@@ -32,9 +37,10 @@ import type { LiveMatchProvider, MatchUpdate } from './LiveMatchProvider'
 
 const POLL_INTERVAL_MS = 15_000
 
-/** The France/England fixture defaults — used as the pre-match fallback and
- * to preserve flags/taglines/lineups when the vendor's own data is missing
- * or doesn't (yet) cover this fixture. */
+/** Default fixture (third place) — used as the pre-match fallback and to
+ * preserve flags/taglines/lineups when the vendor's own data is missing or
+ * doesn't (yet) cover the fixture. `mapFeedToMatch` accepts any fixture's
+ * initial match in its place. */
 const FIXTURE = createInitialMatch()
 
 // --- pure mapping context ---------------------------------------------------
@@ -239,12 +245,12 @@ function computeClock(
   return { minute, stoppageMinute, announcedStoppage: nextAnnounced }
 }
 
-function buildTeam(id: TeamId, vendorTeam: LiveFeedTeam): Team {
+function buildTeam(id: TeamId, vendorTeam: LiveFeedTeam, fixture: Match): Team {
   const fixtureTeam =
-    vendorTeam.name === FIXTURE.teams.home.name
-      ? FIXTURE.teams.home
-      : vendorTeam.name === FIXTURE.teams.away.name
-        ? FIXTURE.teams.away
+    vendorTeam.name === fixture.teams.home.name
+      ? fixture.teams.home
+      : vendorTeam.name === fixture.teams.away.name
+        ? fixture.teams.away
         : undefined
 
   if (fixtureTeam) {
@@ -325,13 +331,13 @@ function toTeamLineup(team: LiveFeedTeam): TeamLineup | undefined {
   }
 }
 
-function buildLineups(home: LiveFeedTeam, away: LiveFeedTeam): Match['lineups'] {
+function buildLineups(home: LiveFeedTeam, away: LiveFeedTeam, fixture: Match): Match['lineups'] {
   const homeLineup = toTeamLineup(home)
   const awayLineup = toTeamLineup(away)
   if (homeLineup && awayLineup) {
     return { home: homeLineup, away: awayLineup }
   }
-  return FIXTURE.lineups
+  return fixture.lineups
 }
 
 function normalizeName(name: string): string {
@@ -492,6 +498,7 @@ export function mapFeedToMatch(
   feed: LiveFeedPayload,
   context: MapContext,
   nowMs: number,
+  fixture: Match = FIXTURE,
 ): MapFeedResult {
   const resolvedMinute =
     feed.minute ??
@@ -538,8 +545,8 @@ export function mapFeedToMatch(
 
   const homeTeamId = feed.homeTeam.id
   const teams: Record<TeamId, Team> = {
-    home: buildTeam('home', feed.homeTeam),
-    away: buildTeam('away', feed.awayTeam),
+    home: buildTeam('home', feed.homeTeam, fixture),
+    away: buildTeam('away', feed.awayTeam, fixture),
   }
 
   // v4 semantics: `fullTime` includes regulation plus extra time, but never
@@ -797,7 +804,7 @@ export function mapFeedToMatch(
   })
 
   const lineups = applySubstitutions(
-    buildLineups(feed.homeTeam, feed.awayTeam),
+    buildLineups(feed.homeTeam, feed.awayTeam, fixture),
     feed.substitutions,
     homeTeamId,
   )
@@ -817,9 +824,9 @@ export function mapFeedToMatch(
       : undefined
 
   const matchWithoutMomentum: Match = {
-    competition: FIXTURE.competition,
-    round: FIXTURE.round,
-    venue: feed.venue ?? FIXTURE.venue,
+    competition: fixture.competition,
+    round: fixture.round,
+    venue: feed.venue ?? fixture.venue,
     kickoffIso: feed.utcDate,
     referee: feed.referee ?? undefined,
     attendance: feed.attendance ?? undefined,
@@ -834,7 +841,7 @@ export function mapFeedToMatch(
     halfTimeScore,
     teams,
     phase,
-    knockout: FIXTURE.knockout,
+    knockout: fixture.knockout,
     minute: clock.minute,
     stoppageMinute: clock.stoppageMinute,
     announcedStoppage: clock.announcedStoppage,
@@ -897,13 +904,19 @@ export class ApiMatchProvider implements LiveMatchProvider {
   private disposed = false
   private timer: ReturnType<typeof setInterval> | null = null
 
+  private readonly fixture: FixtureConfig
+  private readonly fixtureMatch: Match
+
   private context: MapContext = createInitialContext()
-  private lastMatch: Match = createInitialMatch()
+  private lastMatch: Match
   private lastStatus: ConnectionStatus = 'connecting'
   private consecutiveFailures = 0
 
-  constructor(baseUrl = '') {
+  constructor(baseUrl = '', fixture: FixtureConfig = FIXTURES[DEFAULT_FIXTURE_ID]) {
     this.baseUrl = baseUrl
+    this.fixture = fixture
+    this.fixtureMatch = fixture.createInitialMatch()
+    this.lastMatch = fixture.createInitialMatch()
   }
 
   subscribe(listener: (update: MatchUpdate) => void): () => void {
@@ -935,14 +948,14 @@ export class ApiMatchProvider implements LiveMatchProvider {
     if (this.disposed) return
 
     try {
-      const response = await fetch(`${this.baseUrl}/api/match`)
+      const response = await fetch(`${this.baseUrl}/api/match?fixture=${this.fixture.id}`)
       if (this.disposed) return
 
       const body = (await response.json()) as LiveFeedResponse
 
       if (!body.configured) {
         this.consecutiveFailures = 0
-        this.setState(createInitialMatch(), 'disconnected')
+        this.setState(this.fixture.createInitialMatch(), 'disconnected')
         return
       }
 
@@ -951,7 +964,12 @@ export class ApiMatchProvider implements LiveMatchProvider {
         return
       }
 
-      const { match, context } = mapFeedToMatch(body.feed, this.context, Date.now())
+      const { match, context } = mapFeedToMatch(
+        body.feed,
+        this.context,
+        Date.now(),
+        this.fixtureMatch,
+      )
       this.context = context
       this.consecutiveFailures = 0
 

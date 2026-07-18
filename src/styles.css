@@ -155,6 +155,35 @@ button {
   color: var(--accent);
 }
 
+.topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.topbar__fixture {
+  appearance: none;
+  max-width: 52vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 6px 28px 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238a94a6' stroke-width='1.5'/></svg>")
+    no-repeat right 10px center;
+  background-color: var(--panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.topbar__fixture:hover {
+  border-color: var(--accent);
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;

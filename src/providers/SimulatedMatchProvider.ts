@@ -1,5 +1,5 @@
 import type { Match, MatchEvent, MatchEventType, PenaltyKick, Score, TeamId } from '../domain/types'
-import { createInitialMatch, PRE_MATCH_MODEL } from '../domain/fixture'
+import { DEFAULT_FIXTURE_ID, FIXTURES, type FixtureConfig } from '../domain/fixture'
 import {
   DEFAULT_STOPPAGE,
   ET_FIRST_END,
@@ -117,8 +117,8 @@ function opponent(team: TeamId): TeamId {
   return team === 'home' ? 'away' : 'home'
 }
 
-function baseShotsPerMinute(team: TeamId): number {
-  const teamXg = team === 'home' ? PRE_MATCH_MODEL.xgHome : PRE_MATCH_MODEL.xgAway
+function baseShotsPerMinute(team: TeamId, fixture: FixtureConfig): number {
+  const teamXg = team === 'home' ? fixture.preMatchModel.xgHome : fixture.preMatchModel.xgAway
   return teamXg / XG_PER_SHOT / TOTAL_EXPECTED_MINUTES
 }
 
@@ -133,7 +133,8 @@ function baseShotsPerMinute(team: TeamId): number {
  * and stores the result, it never hand-tunes momentum values.
  */
 export class SimulatedMatchProvider implements LiveMatchProvider, SimulationControls {
-  private match: Match = createInitialMatch()
+  private readonly fixture: FixtureConfig
+  private match: Match
   private listeners = new Set<(update: MatchUpdate) => void>()
   private timer: ReturnType<typeof setInterval> | null = null
   private running = false
@@ -142,8 +143,13 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
   /** Ticks left in the current short break (extra-time break or ET half-time). */
   private breakTicksRemaining = 0
 
-  constructor(initialSpeed: number = DEFAULT_SPEED) {
+  constructor(
+    initialSpeed: number = DEFAULT_SPEED,
+    fixture: FixtureConfig = FIXTURES[DEFAULT_FIXTURE_ID],
+  ) {
     this.speed = isSupportedSpeed(initialSpeed) ? initialSpeed : DEFAULT_SPEED
+    this.fixture = fixture
+    this.match = fixture.createInitialMatch()
   }
 
   subscribe(listener: (update: MatchUpdate) => void): () => void {
@@ -168,7 +174,7 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
       this.appendEvent({
         minute: 0,
         type: 'kickoff',
-        description: 'Kick-off in Miami.',
+        description: `Kick-off${this.match.venue ? ` in ${this.match.venue}` : ''}.`,
         modelReaction: 'Pre-match probabilities activated.',
       })
     }
@@ -189,7 +195,7 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
     this.running = false
     this.eventCounter = 0
     this.breakTicksRemaining = 0
-    this.match = createInitialMatch()
+    this.match = this.fixture.createInitialMatch()
     this.emit('live')
   }
 
@@ -644,7 +650,7 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
   }
 
   private shotProbabilityForTeam(team: TeamId): number {
-    const base = baseShotsPerMinute(team)
+    const base = baseShotsPerMinute(team, this.fixture)
 
     const own = this.match.redCards[team]
     const opp = this.match.redCards[opponent(team)]
