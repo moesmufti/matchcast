@@ -96,6 +96,8 @@ export interface TeamLineup {
   formation: string
   /** 11 players: GK first, then defenders → forwards in line order, each line left→right. */
   players: LineupPlayer[]
+  /** Unused substitutes still available on the bench; players are removed as they come on. */
+  bench?: LineupPlayer[]
 }
 
 /** Full live state of the match — the single source of truth for rendering. */

@@ -88,6 +88,8 @@ export interface LiveFeedTeam {
   /** Tier-gated — absent unless the plan includes it. */
   lineup?: LiveFeedLineupPlayer[]
   /** Tier-gated — absent unless the plan includes it. */
+  bench?: LiveFeedLineupPlayer[]
+  /** Tier-gated — absent unless the plan includes it. */
   statistics?: LiveFeedTeamStatistics
 }
 

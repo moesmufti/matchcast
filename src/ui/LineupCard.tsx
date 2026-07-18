@@ -1,4 +1,4 @@
-import type { Match, TeamId, TeamLineup } from '../domain/types'
+import type { LineupPlayer, Match, TeamId, TeamLineup } from '../domain/types'
 
 const WIDTH = 340
 const HEIGHT = 520
@@ -86,9 +86,34 @@ function TeamLabel({
   )
 }
 
+function BenchList({
+  teamId,
+  shortName,
+  bench,
+}: {
+  teamId: TeamId
+  shortName: string
+  bench: LineupPlayer[]
+}) {
+  return (
+    <div className={`lineups__bench-team lineups__bench-team--${teamId}`}>
+      <h3 className="lineups__bench-heading">{shortName}</h3>
+      <ul className="lineups__bench-list">
+        {bench.map((p, i) => (
+          <li key={i} className="lineups__bench-player">
+            <span className="lineups__bench-number">{p.number || ''}</span>
+            {p.name}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export function LineupCard({ teams, lineups }: LineupCardProps) {
   const homePlayers = layoutTeam(lineups.home, 'home')
   const awayPlayers = layoutTeam(lineups.away, 'away')
+  const hasBench = Boolean(lineups.home.bench?.length || lineups.away.bench?.length)
 
   return (
     <div className="lineups">
@@ -183,6 +208,27 @@ export function LineupCard({ teams, lineups }: LineupCardProps) {
           </g>
         </svg>
       </div>
+      {hasBench && (
+        <details className="lineups__bench">
+          <summary className="lineups__bench-summary">Substitutes</summary>
+          <div className="lineups__bench-grid">
+            {lineups.away.bench?.length ? (
+              <BenchList
+                teamId="away"
+                shortName={teams.away.shortName}
+                bench={lineups.away.bench}
+              />
+            ) : null}
+            {lineups.home.bench?.length ? (
+              <BenchList
+                teamId="home"
+                shortName={teams.home.shortName}
+                bench={lineups.home.bench}
+              />
+            ) : null}
+          </div>
+        </details>
+      )}
     </div>
   )
 }

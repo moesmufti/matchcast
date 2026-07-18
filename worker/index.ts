@@ -111,6 +111,7 @@ interface VendorTeam {
   crest?: string
   formation?: string | null
   lineup?: VendorLineupPlayer[]
+  bench?: VendorLineupPlayer[]
   statistics?: VendorTeamStatistics
 }
 
@@ -198,6 +199,12 @@ function toFeedTeam(team: VendorTeam): LiveFeedTeam {
     crest: team.crest,
     formation: team.formation ?? null,
     lineup: team.lineup?.map((p) => ({
+      id: p.id,
+      name: p.name,
+      position: p.position,
+      shirtNumber: p.shirtNumber,
+    })),
+    bench: team.bench?.map((p) => ({
       id: p.id,
       name: p.name,
       position: p.position,

@@ -321,6 +321,7 @@ function toTeamLineup(team: LiveFeedTeam): TeamLineup | undefined {
   return {
     formation: team.formation,
     players: team.lineup.map((p) => ({ number: p.shirtNumber ?? 0, name: p.name })),
+    bench: team.bench?.map((p) => ({ number: p.shirtNumber ?? 0, name: p.name })),
   }
 }
 
@@ -362,9 +363,12 @@ function playerMatches(lineupName: string, vendorName: string): boolean {
 /**
  * Swaps substituted players into the on-pitch lineups so the card shows who
  * is actually playing, keeping the outgoing player's slot (and thus pitch
- * position). Substitutes' shirt numbers aren't in the vendor's substitution
- * records — 0 marks "unknown" and the card renders it as blank. Applied in
- * minute order so chained subs (A→B, later B→C) resolve.
+ * position), and removes them from the bench so the substitutes list shows
+ * only who is still available. The bench entry also supplies the incoming
+ * player's shirt number — the vendor's substitution records don't carry
+ * one, so without a bench match 0 marks "unknown" and the card renders it
+ * as blank. Applied in minute order so chained subs (A→B, later B→C)
+ * resolve.
  */
 function applySubstitutions(
   lineups: Match['lineups'],
@@ -374,8 +378,16 @@ function applySubstitutions(
   if (!lineups || substitutions.length === 0) return lineups
 
   const next: NonNullable<Match['lineups']> = {
-    home: { ...lineups.home, players: [...lineups.home.players] },
-    away: { ...lineups.away, players: [...lineups.away.players] },
+    home: {
+      ...lineups.home,
+      players: [...lineups.home.players],
+      bench: lineups.home.bench && [...lineups.home.bench],
+    },
+    away: {
+      ...lineups.away,
+      players: [...lineups.away.players],
+      bench: lineups.away.bench && [...lineups.away.bench],
+    },
   }
 
   for (const sub of [...substitutions].sort((a, b) => a.minute - b.minute)) {
@@ -383,7 +395,13 @@ function applySubstitutions(
     const players = next[side].players
     const index = players.findIndex((p) => playerMatches(p.name, sub.playerOut.name))
     if (index === -1) continue
-    players[index] = { number: 0, name: lastNameToken(sub.playerIn.name) }
+
+    const bench = next[side].bench
+    const benchIndex = bench?.findIndex((p) => playerMatches(p.name, sub.playerIn.name)) ?? -1
+    const benchEntry = benchIndex === -1 ? undefined : bench?.[benchIndex]
+    if (bench && benchIndex !== -1) bench.splice(benchIndex, 1)
+
+    players[index] = benchEntry ?? { number: 0, name: lastNameToken(sub.playerIn.name) }
   }
 
   return next

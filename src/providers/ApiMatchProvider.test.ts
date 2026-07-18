@@ -262,13 +262,20 @@ describe('mapFeedToMatch', () => {
     expect(homeNames).toContain('Olise')
     expect(homeNames).not.toContain('Mbappé')
     expect(homeNames).not.toContain('Dembélé')
-    // The incoming player takes the outgoing player's slot (pitch position);
-    // shirt number is unknown from the vendor's substitution record → 0.
-    expect(match.lineups?.home.players[9]).toEqual({ number: 0, name: 'Thuram' })
+    // The incoming player takes the outgoing player's slot (pitch position),
+    // carrying the shirt number from their bench entry.
+    expect(match.lineups?.home.players[9]).toEqual({ number: 9, name: 'Thuram' })
 
     const awayNames = match.lineups?.away.players.map((p) => p.name)
     expect(awayNames).toContain('Palmer')
     expect(awayNames).not.toContain('Mainoo')
+
+    // Players who came on are no longer listed as available substitutes.
+    const homeBench = match.lineups?.home.bench?.map((p) => p.name)
+    expect(homeBench).not.toContain('Thuram')
+    expect(homeBench).not.toContain('Olise')
+    expect(homeBench).toContain('Rabiot')
+    expect(match.lineups?.away.bench?.map((p) => p.name)).not.toContain('Palmer')
   })
 
   it('maps FINISHED to full-time', () => {

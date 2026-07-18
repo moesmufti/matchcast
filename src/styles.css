@@ -896,6 +896,76 @@ button {
   fill: var(--accent2);
 }
 
+.lineups__bench {
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.lineups__bench-summary {
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.lineups__bench-summary:hover {
+  color: var(--text);
+}
+
+.lineups__bench-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.lineups__bench-heading {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.lineups__bench-team--home .lineups__bench-heading {
+  color: var(--accent);
+}
+.lineups__bench-team--away .lineups__bench-heading {
+  color: var(--accent2);
+}
+
+.lineups__bench-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lineups__bench-player {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.lineups__bench-number {
+  min-width: 1.5em;
+  text-align: right;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 /* ==========================================================================
    SimControls
    ========================================================================== */
