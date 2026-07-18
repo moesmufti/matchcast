@@ -101,6 +101,7 @@ interface VendorPenaltyKick {
 interface VendorTeamStatistics {
   shots?: number
   shots_on_goal?: number
+  ball_possession?: number
   [key: string]: unknown
 }
 
@@ -265,7 +266,11 @@ function toFeedTeam(team: VendorTeam): LiveFeedTeam {
       shirtNumber: p.shirtNumber,
     })),
     statistics: team.statistics
-      ? { shots: team.statistics.shots, shots_on_goal: team.statistics.shots_on_goal }
+      ? {
+          shots: team.statistics.shots,
+          shots_on_goal: team.statistics.shots_on_goal,
+          ball_possession: team.statistics.ball_possession,
+        }
       : undefined,
   }
 }

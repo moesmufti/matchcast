@@ -792,6 +792,15 @@ export function mapFeedToMatch(
     homeTeamId,
   )
 
+  const possession: Record<TeamId, number> | undefined =
+    feed.homeTeam.statistics?.ball_possession !== undefined &&
+    feed.awayTeam.statistics?.ball_possession !== undefined
+      ? {
+          home: feed.homeTeam.statistics.ball_possession,
+          away: feed.awayTeam.statistics.ball_possession,
+        }
+      : undefined
+
   const halfTimeScore: Score | undefined =
     feed.score.halfTime.home !== null && feed.score.halfTime.away !== null
       ? { home: feed.score.halfTime.home, away: feed.score.halfTime.away }
@@ -823,6 +832,7 @@ export function mapFeedToMatch(
     penalties,
     redCards,
     shots: shotResult.shots,
+    possession,
     momentum: { home: 0, away: 0 },
     events,
     lineups,

@@ -13,11 +13,24 @@ function countEvents(events: MatchEvent[], type: MatchEvent['type']): Record<Tea
 }
 
 /** One home-vs-away tally with a split bar showing the home share. */
-function StatRow({ label, home, away }: { label: string; home: number; away: number }) {
+function StatRow({
+  label,
+  home,
+  away,
+  suffix = '',
+}: {
+  label: string
+  home: number
+  away: number
+  suffix?: string
+}) {
   const total = home + away
   return (
     <div className="stats__row">
-      <span className="stats__value">{home}</span>
+      <span className="stats__value">
+        {home}
+        {suffix}
+      </span>
       <div className="stats__mid">
         <span className="stats__label">{label}</span>
         <div className="stats__bar" aria-hidden="true">
@@ -26,7 +39,10 @@ function StatRow({ label, home, away }: { label: string; home: number; away: num
           ) : null}
         </div>
       </div>
-      <span className="stats__value">{away}</span>
+      <span className="stats__value">
+        {away}
+        {suffix}
+      </span>
     </div>
   )
 }
@@ -44,7 +60,9 @@ export function MatchStatsCard({ match }: MatchStatsCardProps) {
   const reds = match.redCards
   const hasShots = match.shots.home.total + match.shots.away.total > 0
   const hasTallies =
-    hasShots || yellows.home + yellows.away + reds.home + reds.away + subs.home + subs.away > 0
+    hasShots ||
+    match.possession !== undefined ||
+    yellows.home + yellows.away + reds.home + reds.away + subs.home + subs.away > 0
   // The vendor's aggregates can be internally inconsistent (meetings in its
   // database without a recorded result), which would render as nonsense like
   // "6 played, 0 wins, 0 wins, 2 draws". Only a record that adds up is shown.
@@ -73,6 +91,14 @@ export function MatchStatsCard({ match }: MatchStatsCardProps) {
             <span className="stats__team stats__team--home">{home.shortName}</span>
             <span className="stats__team stats__team--away">{away.shortName}</span>
           </div>
+          {match.possession && (
+            <StatRow
+              label="Possession"
+              home={match.possession.home}
+              away={match.possession.away}
+              suffix="%"
+            />
+          )}
           {hasShots && (
             <>
               <StatRow label="Shots" home={match.shots.home.total} away={match.shots.away.total} />

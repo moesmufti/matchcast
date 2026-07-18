@@ -240,17 +240,18 @@ describe('mapFeedToMatch', () => {
           playerIn: { id: 302, name: 'Marcus Thuram' },
         },
         {
-          // Accent-stripped vendor spelling must still match fixture "Dembélé".
+          // Accent-stripped vendor spellings must still match the fixture's
+          // "Doué" (out) and bench "Dembélé" (in).
           minute: 59,
           team: { id: 1, name: 'Home FC' },
-          playerOut: { id: 303, name: 'Ousmane Dembele' },
-          playerIn: { id: 304, name: 'Michael Olise' },
+          playerOut: { id: 303, name: 'Desire Doue' },
+          playerIn: { id: 304, name: 'Ousmane Dembele' },
         },
         {
           minute: 59,
           team: { id: 2, name: 'Away FC' },
-          playerOut: { id: 401, name: 'Kobbie Mainoo' },
-          playerIn: { id: 402, name: 'Cole Palmer' },
+          playerOut: { id: 401, name: 'Ivan Toney' },
+          playerIn: { id: 402, name: 'Harry Kane' },
         },
       ],
     })
@@ -259,23 +260,23 @@ describe('mapFeedToMatch', () => {
 
     const homeNames = match.lineups?.home.players.map((p) => p.name)
     expect(homeNames).toContain('Thuram')
-    expect(homeNames).toContain('Olise')
+    expect(homeNames).toContain('Dembélé')
     expect(homeNames).not.toContain('Mbappé')
-    expect(homeNames).not.toContain('Dembélé')
+    expect(homeNames).not.toContain('Doué')
     // The incoming player takes the outgoing player's slot (pitch position),
-    // carrying the shirt number from their bench entry.
-    expect(match.lineups?.home.players[9]).toEqual({ number: 9, name: 'Thuram' })
+    // carrying their bench entry (fixture shirt numbers are unknown → 0).
+    expect(match.lineups?.home.players[10]).toEqual({ number: 0, name: 'Thuram' })
 
     const awayNames = match.lineups?.away.players.map((p) => p.name)
-    expect(awayNames).toContain('Palmer')
-    expect(awayNames).not.toContain('Mainoo')
+    expect(awayNames).toContain('Kane')
+    expect(awayNames).not.toContain('Toney')
 
     // Players who came on are no longer listed as available substitutes.
     const homeBench = match.lineups?.home.bench?.map((p) => p.name)
     expect(homeBench).not.toContain('Thuram')
-    expect(homeBench).not.toContain('Olise')
-    expect(homeBench).toContain('Rabiot')
-    expect(match.lineups?.away.bench?.map((p) => p.name)).not.toContain('Palmer')
+    expect(homeBench).not.toContain('Dembélé')
+    expect(homeBench).toContain('Barcola')
+    expect(match.lineups?.away.bench?.map((p) => p.name)).not.toContain('Kane')
   })
 
   it('passes half-time score, officials, attendance and head-to-head through to the match', () => {
@@ -309,6 +310,24 @@ describe('mapFeedToMatch', () => {
     expect(match.referee).toBeUndefined()
     expect(match.attendance).toBeUndefined()
     expect(match.headToHead).toBeUndefined()
+    expect(match.possession).toBeUndefined()
+  })
+
+  it('maps ball possession when the vendor provides it for both sides', () => {
+    const feed = baseFeed({
+      status: 'IN_PLAY',
+      minute: 30,
+      homeTeam: team(1, 'Home FC', {
+        statistics: { shots: 3, shots_on_goal: 1, ball_possession: 58 },
+      }),
+      awayTeam: team(2, 'Away FC', {
+        statistics: { shots: 2, shots_on_goal: 0, ball_possession: 42 },
+      }),
+    })
+
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    expect(match.possession).toEqual({ home: 58, away: 42 })
   })
 
   it('maps FINISHED to full-time', () => {

@@ -102,6 +102,8 @@ export interface LineupPlayer {
 export interface TeamLineup {
   /** e.g. "4-3-3" */
   formation: string
+  /** True for editorial predicted line-ups (fixture fallback), absent for real vendor data. */
+  predicted?: boolean
   /** 11 players: GK first, then defenders → forwards in line order, each line left→right. */
   players: LineupPlayer[]
   /** Unused substitutes still available on the bench; players are removed as they come on. */
@@ -144,6 +146,8 @@ export interface Match {
   redCards: Record<TeamId, number>
   /** Shot counts per team, updated live. Drives the momentum model. */
   shots: Record<TeamId, ShotCounts>
+  /** Ball possession per team as percentages; absent when the data source doesn't provide it. */
+  possession?: Record<TeamId, number>
   /**
    * Recent attacking momentum per team, 0–1. Derived purely from recent
    * shot/goal events via `computeMomentum` (src/domain/momentum.ts) —

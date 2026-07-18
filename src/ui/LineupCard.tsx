@@ -114,10 +114,14 @@ export function LineupCard({ teams, lineups }: LineupCardProps) {
   const homePlayers = layoutTeam(lineups.home, 'home')
   const awayPlayers = layoutTeam(lineups.away, 'away')
   const hasBench = Boolean(lineups.home.bench?.length || lineups.away.bench?.length)
+  // Fixture-fallback line-ups are editorial guesses — say so instead of
+  // presenting them as confirmed team sheets.
+  const predicted = Boolean(lineups.home.predicted || lineups.away.predicted)
+  const title = predicted ? 'Predicted line-ups' : 'Line-ups'
 
   return (
     <div className="lineups">
-      <h2 className="card-eyebrow">Line-ups</h2>
+      <h2 className="card-eyebrow">{title}</h2>
       <div className="lineups__legend">
         <TeamLabel
           teamId="away"
@@ -137,9 +141,9 @@ export function LineupCard({ teams, lineups }: LineupCardProps) {
           className="lineups__pitch"
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           role="img"
-          aria-label={`Starting line-ups: ${teams.home.name} in a ${lineups.home.formation}, ${teams.away.name} in a ${lineups.away.formation}`}
+          aria-label={`${title}: ${teams.home.name} in a ${lineups.home.formation}, ${teams.away.name} in a ${lineups.away.formation}`}
         >
-          <title>Starting line-ups</title>
+          <title>{title}</title>
           <rect className="lineups__field" x={0} y={0} width={WIDTH} height={HEIGHT} rx={8} />
           <g className="lineups__markings">
             <rect

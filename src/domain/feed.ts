@@ -68,6 +68,8 @@ export interface LiveFeedPenaltyKick {
 export interface LiveFeedTeamStatistics {
   shots?: number
   shots_on_goal?: number
+  /** Percentage 0–100. Tier-gated like the shot counts. */
+  ball_possession?: number
 }
 
 export interface LiveFeedLineupPlayer {
