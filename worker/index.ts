@@ -165,7 +165,7 @@ interface VendorMatchBody {
 }
 
 interface VendorDiscoveryBody {
-  matches?: Array<{ id: number }>
+  matches?: Array<{ id: number; stage?: string }>
 }
 
 interface VendorHead2HeadBody {
@@ -201,15 +201,19 @@ async function resolveMatchId(
   const dateFrom = isoDate(new Date(now.getTime() - 24 * 60 * 60 * 1000))
   const dateTo = isoDate(new Date(now.getTime() + 24 * 60 * 60 * 1000))
 
+  // The competition-scoped endpoint is the one that honours `stage` — the
+  // cross-competition /matches listing silently ignores it and would hand
+  // back whichever WC match comes first in the window. Double-check the
+  // stage on the response rather than trusting the first entry.
   const res = await vendorFetch(
-    `/matches?competitions=WC&stage=${stage}&dateFrom=${dateFrom}&dateTo=${dateTo}`,
+    `/competitions/WC/matches?stage=${stage}&dateFrom=${dateFrom}&dateTo=${dateTo}`,
     apiKey,
   )
   if (!res.ok) {
     throw new Error(`Match discovery failed with vendor status ${res.status}.`)
   }
   const body = (await res.json()) as VendorDiscoveryBody
-  const match = body.matches?.[0]
+  const match = body.matches?.find((m) => (m.stage ? m.stage === stage : true))
   if (!match) return null
 
   state.discoveredMatchId = String(match.id)
