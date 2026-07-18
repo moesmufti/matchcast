@@ -12,7 +12,7 @@ export function ModelSnapshot({ match, prediction }: ModelSnapshotProps) {
 
   return (
     <div className="snapshot">
-      <h2 className="snapshot__title">Model snapshot</h2>
+      <h2 className="card-eyebrow">Model snapshot</h2>
       <dl className="snapshot__rows">
         <div className="snapshot__row">
           <dt>Projected score</dt>
@@ -41,8 +41,25 @@ export function ModelSnapshot({ match, prediction }: ModelSnapshotProps) {
         </div>
       </dl>
       <div className="snapshot__confidence">
-        <span className="snapshot__confidence-label">Live confidence</span>
-        <span className="snapshot__confidence-value">{prediction.confidence.toFixed(1)} / 10</span>
+        <div className="snapshot__confidence-top">
+          <span className="snapshot__confidence-label">Live confidence</span>
+          <span className="snapshot__confidence-value">
+            {prediction.confidence.toFixed(1)} / 10
+          </span>
+        </div>
+        <div
+          className="snapshot__confidence-meter"
+          role="meter"
+          aria-valuenow={prediction.confidence}
+          aria-valuemin={0}
+          aria-valuemax={10}
+          aria-label="Live confidence"
+        >
+          <div
+            className="snapshot__confidence-fill"
+            style={{ width: `${prediction.confidence * 10}%` }}
+          />
+        </div>
       </div>
     </div>
   )

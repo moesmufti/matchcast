@@ -1,10 +1,13 @@
-import type { ProbabilitySnapshot } from '../domain/types'
+import type { MatchEvent, ProbabilitySnapshot, TeamId } from '../domain/types'
 
 const WIDTH = 600
-const HEIGHT = 220
-const MARGIN_TOP = 12
-const MARGIN_BOTTOM = 16
+const HEIGHT = 230
+const MARGIN_TOP = 10
+const MARGIN_BOTTOM = 24
+const MARGIN_LEFT = 30
 const PLOT_HEIGHT = HEIGHT - MARGIN_TOP - MARGIN_BOTTOM
+const PLOT_WIDTH = WIDTH - MARGIN_LEFT
+const FULL_MATCH = 90
 
 type SeriesKey = 'home' | 'draw' | 'away'
 
@@ -12,65 +15,146 @@ function yFor(value: number): number {
   return MARGIN_TOP + PLOT_HEIGHT - (value / 100) * PLOT_HEIGHT
 }
 
-function xFor(index: number, count: number): number {
-  if (count <= 1) return 0
-  return (index / (count - 1)) * WIDTH
+function xFor(minute: number): number {
+  return MARGIN_LEFT + (Math.min(minute, FULL_MATCH) / FULL_MATCH) * PLOT_WIDTH
 }
 
-function buildLine(history: ProbabilitySnapshot[], key: SeriesKey): string {
+/**
+ * X position for each snapshot: minutes map onto the 0–90 timeline; multiple
+ * snapshots within the same minute fan out fractionally so vertical jumps
+ * (goals, cards) stay visible as sharp steps rather than overdrawing.
+ */
+function xPositions(history: ProbabilitySnapshot[]): number[] {
+  const positions: number[] = []
+  for (let i = 0; i < history.length; i++) {
+    const minute = history[i].minute
+    let sameMinuteIndex = 0
+    let sameMinuteCount = 1
+    for (let j = 0; j < history.length; j++) {
+      if (history[j].minute === minute) {
+        if (j < i) sameMinuteIndex++
+        if (j !== i) sameMinuteCount++
+      }
+    }
+    positions.push(xFor(minute + sameMinuteIndex / Math.max(1, sameMinuteCount)))
+  }
+  return positions
+}
+
+function buildLine(history: ProbabilitySnapshot[], xs: number[], key: SeriesKey): string {
   if (history.length === 0) return ''
   if (history.length === 1) {
     const y = yFor(history[0][key])
-    return `M0,${y} L${WIDTH},${y}`
+    return `M${MARGIN_LEFT},${y} L${WIDTH},${y}`
   }
-  return history
-    .map((point, i) => `${i === 0 ? 'M' : 'L'}${xFor(i, history.length)},${yFor(point[key])}`)
-    .join(' ')
+  return history.map((point, i) => `${i === 0 ? 'M' : 'L'}${xs[i]},${yFor(point[key])}`).join(' ')
 }
 
-function buildArea(history: ProbabilitySnapshot[], key: SeriesKey): string {
+function buildArea(history: ProbabilitySnapshot[], xs: number[], key: SeriesKey): string {
   if (history.length === 0) return ''
-  const line = buildLine(history, key)
+  const line = buildLine(history, xs, key)
   const baseline = yFor(0)
-  return `${line} L${WIDTH},${baseline} L0,${baseline} Z`
+  const endX = history.length === 1 ? WIDTH : (xs[xs.length - 1] ?? WIDTH)
+  return `${line} L${endX},${baseline} L${MARGIN_LEFT},${baseline} Z`
 }
 
 interface ProbabilityChartProps {
   history: ProbabilitySnapshot[]
+  events: MatchEvent[]
 }
 
-export function ProbabilityChart({ history }: ProbabilityChartProps) {
-  const homeLine = buildLine(history, 'home')
-  const drawLine = buildLine(history, 'draw')
-  const awayLine = buildLine(history, 'away')
-  const homeArea = buildArea(history, 'home')
+interface GoalMarker {
+  minute: number
+  team: TeamId
+}
+
+export function ProbabilityChart({ history, events }: ProbabilityChartProps) {
+  const xs = xPositions(history)
+  const homeLine = buildLine(history, xs, 'home')
+  const drawLine = buildLine(history, xs, 'draw')
+  const awayLine = buildLine(history, xs, 'away')
+  const homeArea = buildArea(history, xs, 'home')
+
+  const goals: GoalMarker[] = events
+    .filter((e) => e.type === 'goal' && e.team)
+    .map((e) => ({ minute: e.minute, team: e.team as TeamId }))
+
+  const lastMinute = history.length > 0 ? history[history.length - 1].minute : 0
 
   return (
     <div className="chart">
-      <h2 className="chart__title">Probability history</h2>
+      <h2 className="card-eyebrow">Probability timeline</h2>
       <div className="chart__frame">
         <svg
           className="chart__svg"
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           preserveAspectRatio="none"
           role="img"
-          aria-label="Line chart of win probability history across the match for France, draw and England"
+          aria-label="Win probability over the 90 minutes for France, draw and England, with goals marked"
         >
-          <title>Win probability history</title>
-          {[25, 50, 75].map((line) => (
-            <line
-              key={line}
-              className="chart__gridline"
-              x1={0}
-              x2={WIDTH}
-              y1={yFor(line)}
-              y2={yFor(line)}
-            />
+          <title>Win probability timeline</title>
+          {[0, 25, 50, 75, 100].map((line) => (
+            <g key={line}>
+              <line
+                className="chart__gridline"
+                x1={MARGIN_LEFT}
+                x2={WIDTH}
+                y1={yFor(line)}
+                y2={yFor(line)}
+              />
+              <text className="chart__axis-label" x={MARGIN_LEFT - 8} y={yFor(line) + 3}>
+                {line}
+              </text>
+            </g>
+          ))}
+          {[15, 30, 45, 60, 75].map((minute) => (
+            <g key={minute}>
+              <line
+                className={`chart__minute-line${minute === 45 ? ' chart__minute-line--ht' : ''}`}
+                x1={xFor(minute)}
+                x2={xFor(minute)}
+                y1={MARGIN_TOP}
+                y2={yFor(0)}
+              />
+              <text
+                className="chart__axis-label chart__axis-label--x"
+                x={xFor(minute)}
+                y={HEIGHT - 8}
+              >
+                {minute === 45 ? 'HT' : `${minute}'`}
+              </text>
+            </g>
           ))}
           {homeArea && <path className="chart__area" d={homeArea} />}
           {drawLine && <path className="chart__line chart__line--draw" d={drawLine} />}
           {awayLine && <path className="chart__line chart__line--away" d={awayLine} />}
           {homeLine && <path className="chart__line chart__line--home" d={homeLine} />}
+          {goals.map((goal, i) => (
+            <g key={`${goal.minute}-${goal.team}-${i}`}>
+              <line
+                className={`chart__goal-line chart__goal-line--${goal.team}`}
+                x1={xFor(goal.minute)}
+                x2={xFor(goal.minute)}
+                y1={MARGIN_TOP}
+                y2={yFor(0)}
+              />
+              <circle
+                className={`chart__goal-dot chart__goal-dot--${goal.team}`}
+                cx={xFor(goal.minute)}
+                cy={MARGIN_TOP + 6}
+                r={4}
+              />
+            </g>
+          ))}
+          {lastMinute > 0 && lastMinute < FULL_MATCH && (
+            <line
+              className="chart__now-line"
+              x1={xFor(lastMinute)}
+              x2={xFor(lastMinute)}
+              y1={MARGIN_TOP}
+              y2={yFor(0)}
+            />
+          )}
         </svg>
       </div>
       <div className="chart__legend">
@@ -85,6 +169,10 @@ export function ProbabilityChart({ history }: ProbabilityChartProps) {
         <span className="chart__legend-item">
           <span className="chart__swatch chart__swatch--away" aria-hidden="true" />
           England
+        </span>
+        <span className="chart__legend-item">
+          <span className="chart__swatch chart__swatch--goal" aria-hidden="true" />
+          Goal
         </span>
       </div>
     </div>

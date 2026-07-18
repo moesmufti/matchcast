@@ -41,14 +41,16 @@ export default function App() {
             {notice}
           </div>
         )}
-        <MatchHeader match={match} />
-        <ProbabilityBars
-          prediction={prediction}
-          homeName={match.teams.home.name}
-          awayName={match.teams.away.name}
-        />
+        <div className="broadcast">
+          <MatchHeader match={match} />
+          <ProbabilityBars
+            prediction={prediction}
+            homeName={match.teams.home.name}
+            awayName={match.teams.away.name}
+          />
+        </div>
         <div className="app__grid">
-          <ProbabilityChart history={history} />
+          <ProbabilityChart history={history} events={match.events} />
           <ModelSnapshot match={match} prediction={prediction} />
         </div>
         <EventFeed events={match.events} />

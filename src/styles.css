@@ -1,20 +1,25 @@
 /* ==========================================================================
    Matchcast — dark broadcast theme
+   Display type: Barlow Condensed (scoreboard numerals, eyebrows)
+   Body type:    Inter
    ========================================================================== */
 
 :root {
-  --bg: #070b14;
+  --bg: #05080f;
   --panel: #0f1727;
   --panel2: #131f33;
   --line: #23314a;
   --text: #f4f7fb;
   --muted: #93a4bd;
   --accent: #71d4ff; /* France */
-  --accent2: #8b7cff; /* England */
+  --accent2: #9b8cff; /* England */
   --draw: #9aa8bf;
   --good: #4ee1a0;
   --warn: #ffd166;
   --danger: #ff6b7a;
+
+  --font-display: 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 
   --radius-lg: 26px;
   --radius-md: 22px;
@@ -36,20 +41,13 @@ body {
 body {
   background-color: var(--bg);
   background-image:
-    radial-gradient(700px 420px at 6% -8%, rgba(113, 212, 255, 0.16), transparent 60%),
-    radial-gradient(700px 420px at 96% -8%, rgba(139, 124, 255, 0.16), transparent 60%);
+    radial-gradient(760px 460px at 8% -10%, rgba(113, 212, 255, 0.14), transparent 60%),
+    radial-gradient(760px 460px at 94% -10%, rgba(139, 124, 255, 0.14), transparent 60%),
+    radial-gradient(1100px 500px at 50% 8%, rgba(31, 60, 110, 0.22), transparent 70%);
   background-repeat: no-repeat;
   background-attachment: fixed;
   color: var(--text);
-  font-family:
-    'Inter',
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    Helvetica,
-    Arial,
-    sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
@@ -66,6 +64,17 @@ button {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Shared card eyebrow — every panel titles itself the same way. */
+.card-eyebrow {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--muted);
 }
 
 /* ==========================================================================
@@ -129,15 +138,16 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 18px 0;
-  background: linear-gradient(180deg, rgba(7, 11, 20, 0.96), rgba(7, 11, 20, 0.82));
+  padding: 16px 0;
+  background: linear-gradient(180deg, rgba(5, 8, 15, 0.96), rgba(5, 8, 15, 0.82));
   backdrop-filter: blur(6px);
 }
 
 .topbar__brand {
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  font-size: clamp(0.85rem, 2.2vw, 1.05rem);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  font-size: clamp(1rem, 2.6vw, 1.25rem);
   white-space: nowrap;
 }
 
@@ -209,39 +219,54 @@ button {
 }
 
 /* ==========================================================================
-   Hero / MatchHeader
+   Broadcast unit — hero scoreboard fused with the Win Meter
    ========================================================================== */
 
-.hero {
-  background: linear-gradient(145deg, rgba(19, 31, 51, 0.96), rgba(10, 15, 26, 0.96));
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+.broadcast {
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.6);
-  padding: 24px;
+  border-radius: var(--radius-lg);
+}
+
+.hero {
+  background:
+    radial-gradient(520px 200px at 50% 115%, rgba(113, 212, 255, 0.07), transparent 70%),
+    linear-gradient(145deg, rgba(19, 31, 51, 0.96), rgba(9, 14, 25, 0.97));
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 24px 24px 20px;
+  text-align: center;
+}
+
+.hero__eyebrow {
+  margin: 0 0 2px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.26em;
+  color: var(--accent);
 }
 
 .hero__meta {
-  margin: 0 0 18px;
+  margin: 0 0 20px;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   letter-spacing: 0.01em;
 }
 
 .hero__matchup {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 18px;
+  gap: 16px;
   align-items: center;
-  text-align: center;
 }
 
 @media (min-width: 640px) {
   .hero__matchup {
     grid-template-columns: 1fr auto 1fr;
-    text-align: left;
-  }
-  .hero__team--away {
-    text-align: right;
   }
 }
 
@@ -252,36 +277,33 @@ button {
   align-items: center;
 }
 
-@media (min-width: 640px) {
-  .hero__team--home {
-    align-items: flex-start;
-  }
-  .hero__team--away {
-    align-items: flex-end;
-  }
-}
-
 .hero__flag {
-  font-size: 2.4rem;
+  font-size: 2.6rem;
   line-height: 1;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35));
 }
 
 .hero__team-name {
-  font-size: 1.2rem;
-  font-weight: 800;
+  font-family: var(--font-display);
+  font-size: 1.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  line-height: 1;
 }
 
 .hero__team-tagline {
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.82rem;
 }
 
 .hero__center {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 10px;
   order: -1;
+  padding: 0 10px;
 }
 
 @media (min-width: 640px) {
@@ -291,84 +313,138 @@ button {
 }
 
 .hero__score {
-  font-size: clamp(3.6rem, 8vw, 6.4rem);
-  font-weight: 900;
-  letter-spacing: -0.03em;
-  line-height: 1;
+  font-family: var(--font-display);
+  font-size: clamp(4.2rem, 9vw, 7rem);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.hero__bug {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(5, 8, 15, 0.55);
 }
 
 .hero__clock {
+  font-family: var(--font-display);
   color: var(--accent);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
+  letter-spacing: 0.06em;
 }
 
 .hero__phase {
   color: var(--muted);
-  font-size: 0.8rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.85rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.18em;
+  border-left: 1px solid var(--line);
+  padding-left: 10px;
 }
 
 /* ==========================================================================
-   ProbabilityBars
+   Win Meter
    ========================================================================== */
 
-.prob-bars {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 14px;
-}
-
-@media (min-width: 640px) {
-  .prob-bars {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-.prob-card {
+.winmeter {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  padding: 18px;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  padding: 18px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.prob-card__label {
-  color: var(--muted);
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin-bottom: 6px;
+.winmeter__readout {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
+  gap: 12px;
 }
 
-.prob-card__value {
-  font-size: 2rem;
-  font-weight: 800;
-  margin-bottom: 12px;
+.winmeter__outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.winmeter__outcome--home {
+  align-items: flex-start;
+  text-align: left;
+}
+.winmeter__outcome--draw {
+  align-items: center;
+  text-align: center;
+}
+.winmeter__outcome--away {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.winmeter__value {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(2rem, 5vw, 2.9rem);
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
-.prob-card__track {
-  height: 10px;
+.winmeter__outcome--home .winmeter__value {
+  color: var(--accent);
+}
+.winmeter__outcome--draw .winmeter__value {
+  color: var(--draw);
+  font-size: clamp(1.5rem, 3.6vw, 2.1rem);
+}
+.winmeter__outcome--away .winmeter__value {
+  color: var(--accent2);
+}
+
+.winmeter__label {
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+.winmeter__track {
+  display: flex;
+  gap: 3px;
+  height: 16px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
   overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
 }
 
-.prob-card__fill {
+.winmeter__segment {
   height: 100%;
-  border-radius: 999px;
   transition: width 0.8s ease;
+  min-width: 0;
 }
 
-.prob-card__fill--home {
+.winmeter__segment--home {
   background: linear-gradient(90deg, #71d4ff, #4ba3ff);
+  border-radius: 999px 2px 2px 999px;
 }
-.prob-card__fill--draw {
-  background: linear-gradient(90deg, #7686a4, #9aa8bf);
+.winmeter__segment--draw {
+  background: linear-gradient(90deg, #66748f, #8b99b0);
+  border-radius: 2px;
 }
-.prob-card__fill--away {
-  background: linear-gradient(90deg, #8b7cff, #b36cff);
+.winmeter__segment--away {
+  background: linear-gradient(90deg, #b36cff, #8b7cff);
+  border-radius: 2px 999px 999px 2px;
 }
 
 /* ==========================================================================
@@ -382,14 +458,7 @@ button {
   padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-
-.chart__title {
-  margin: 0;
-  font-size: 0.95rem;
-  color: var(--muted);
-  font-weight: 700;
+  gap: 12px;
 }
 
 .chart__frame {
@@ -399,18 +468,48 @@ button {
 .chart__svg {
   width: 100%;
   height: auto;
-  aspect-ratio: 600 / 220;
+  aspect-ratio: 600 / 230;
   display: block;
 }
 
 .chart__gridline {
   stroke: var(--line);
   stroke-width: 1;
+  opacity: 0.7;
+}
+
+.chart__minute-line {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  opacity: 0.5;
+}
+
+.chart__minute-line--ht {
+  stroke: var(--muted);
+  opacity: 0.55;
+}
+
+.chart__now-line {
+  stroke: var(--text);
+  stroke-width: 1;
+  opacity: 0.35;
+}
+
+.chart__axis-label {
+  fill: var(--muted);
+  font-family: var(--font-body);
+  font-size: 10px;
+  text-anchor: end;
+}
+
+.chart__axis-label--x {
+  text-anchor: middle;
 }
 
 .chart__area {
   fill: var(--accent);
-  fill-opacity: 0.12;
+  fill-opacity: 0.1;
   stroke: none;
 }
 
@@ -419,7 +518,6 @@ button {
   stroke-width: 2.5;
   stroke-linejoin: round;
   stroke-linecap: round;
-  transition: d 0.3s ease;
 }
 
 .chart__line--home {
@@ -427,10 +525,34 @@ button {
 }
 .chart__line--draw {
   stroke: var(--draw);
-  stroke-width: 2;
+  stroke-width: 1.75;
+  opacity: 0.85;
 }
 .chart__line--away {
   stroke: var(--accent2);
+}
+
+.chart__goal-line {
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: 0.5;
+}
+.chart__goal-line--home {
+  stroke: var(--accent);
+}
+.chart__goal-line--away {
+  stroke: var(--accent2);
+}
+
+.chart__goal-dot {
+  stroke: var(--panel);
+  stroke-width: 1.5;
+}
+.chart__goal-dot--home {
+  fill: var(--accent);
+}
+.chart__goal-dot--away {
+  fill: var(--accent2);
 }
 
 .chart__legend {
@@ -463,6 +585,12 @@ button {
 .chart__swatch--away {
   background: var(--accent2);
 }
+.chart__swatch--goal {
+  background: var(--text);
+  border-radius: 50%;
+  width: 8px;
+  height: 8px;
+}
 
 /* ==========================================================================
    ModelSnapshot
@@ -476,13 +604,6 @@ button {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-.snapshot__title {
-  margin: 0;
-  font-size: 0.95rem;
-  color: var(--muted);
-  font-weight: 700;
 }
 
 .snapshot__rows {
@@ -513,31 +634,61 @@ button {
 
 .snapshot__row dd {
   margin: 0;
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.2rem;
+  letter-spacing: 0.03em;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .snapshot__confidence {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 10px;
   background: var(--panel2);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   padding: 12px 14px;
+  margin-top: auto;
+}
+
+.snapshot__confidence-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .snapshot__confidence-label {
   color: var(--muted);
-  font-size: 0.85rem;
+  font-family: var(--font-display);
   font-weight: 600;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
 }
 
 .snapshot__confidence-value {
-  font-size: 1.3rem;
-  font-weight: 800;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 700;
   color: var(--good);
   font-variant-numeric: tabular-nums;
+}
+
+.snapshot__confidence-meter {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.snapshot__confidence-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2f8f6d, var(--good));
+  transition: width 0.8s ease;
 }
 
 /* ==========================================================================
@@ -549,13 +700,9 @@ button {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   padding: 18px;
-}
-
-.event-feed__title {
-  margin: 0 0 14px;
-  font-size: 0.95rem;
-  color: var(--muted);
-  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .event-feed__empty {
@@ -570,37 +717,48 @@ button {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   max-height: 420px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
 
 .event-feed__item {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 2px 0 12px 12px;
+  border-bottom: 1px solid rgba(35, 49, 74, 0.6);
+  border-left: 3px solid var(--line);
+}
+
+.event-feed__item--home {
+  border-left-color: rgba(113, 212, 255, 0.65);
+}
+.event-feed__item--away {
+  border-left-color: rgba(155, 140, 255, 0.65);
 }
 
 .event-feed__item:last-child {
   border-bottom: none;
-  padding-bottom: 0;
+  padding-bottom: 2px;
 }
 
 .event-feed__minute {
   flex-shrink: 0;
-  min-width: 34px;
+  min-width: 32px;
+  font-family: var(--font-display);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   color: var(--muted);
-  font-size: 0.8rem;
-  padding-top: 2px;
+  font-size: 0.95rem;
+  padding-top: 1px;
 }
 
 .event-feed__icon {
   flex-shrink: 0;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   line-height: 1.4;
 }
 
@@ -634,11 +792,40 @@ button {
   gap: 14px;
 }
 
-.sim-controls__title {
-  margin: 0;
-  font-size: 0.95rem;
+.sim-controls__teams {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+@media (min-width: 640px) {
+  .sim-controls__teams {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.sim-controls__group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-left: 3px solid var(--line);
+  padding-left: 12px;
+}
+
+.sim-controls__group--home {
+  border-left-color: rgba(113, 212, 255, 0.65);
+}
+.sim-controls__group--away {
+  border-left-color: rgba(155, 140, 255, 0.65);
+}
+
+.sim-controls__group-label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
   color: var(--muted);
-  font-weight: 700;
 }
 
 .sim-controls__row {
@@ -709,10 +896,8 @@ button {
   .status-pill__dot {
     animation: none !important;
   }
-  .prob-card__fill {
-    transition: none !important;
-  }
-  .chart__line {
+  .winmeter__segment,
+  .snapshot__confidence-fill {
     transition: none !important;
   }
   .btn {

@@ -53,9 +53,10 @@ export function MatchHeader({ match }: MatchHeaderProps) {
 
   return (
     <section className="hero" aria-label="Match overview">
-      <p className="hero__meta">
-        {match.competition} · {match.round} · {formatKickoffLine(match)}
+      <p className="hero__eyebrow">
+        {match.competition} · {match.round}
       </p>
+      <p className="hero__meta">{formatKickoffLine(match)}</p>
       <div className="hero__matchup">
         <div className="hero__team hero__team--home">
           <span className="hero__flag" aria-hidden="true">
@@ -71,8 +72,10 @@ export function MatchHeader({ match }: MatchHeaderProps) {
           >
             {match.score.home}–{match.score.away}
           </div>
-          <div className="hero__clock">{formatClock(match.minute)}</div>
-          <div className="hero__phase">{PHASE_LABEL[match.phase]}</div>
+          <div className="hero__bug">
+            <span className="hero__clock">{formatClock(match.minute)}</span>
+            <span className="hero__phase">{PHASE_LABEL[match.phase]}</span>
+          </div>
         </div>
         <div className="hero__team hero__team--away">
           <span className="hero__flag" aria-hidden="true">
