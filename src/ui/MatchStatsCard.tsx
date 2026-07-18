@@ -45,7 +45,16 @@ export function MatchStatsCard({ match }: MatchStatsCardProps) {
   const hasShots = match.shots.home.total + match.shots.away.total > 0
   const hasTallies =
     hasShots || yellows.home + yellows.away + reds.home + reds.away + subs.home + subs.away > 0
-  const h2h = match.headToHead
+  // The vendor's aggregates can be internally inconsistent (meetings in its
+  // database without a recorded result), which would render as nonsense like
+  // "6 played, 0 wins, 0 wins, 2 draws". Only a record that adds up is shown.
+  const h2h =
+    match.headToHead &&
+    match.headToHead.played > 0 &&
+    match.headToHead.wins.home + match.headToHead.wins.away + match.headToHead.draws ===
+      match.headToHead.played
+      ? match.headToHead
+      : undefined
 
   const meta = [
     match.halfTimeScore && `HT ${match.halfTimeScore.home}–${match.halfTimeScore.away}`,
@@ -79,7 +88,7 @@ export function MatchStatsCard({ match }: MatchStatsCardProps) {
           <StatRow label="Substitutions used" home={subs.home} away={subs.away} />
         </div>
       )}
-      {h2h && h2h.played > 0 && (
+      {h2h && (
         <div className="stats__h2h">
           <div className="stats__h2h-top">
             <span className="stats__team stats__team--home">

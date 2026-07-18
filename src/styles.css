@@ -1086,7 +1086,7 @@ button {
   background: var(--accent);
 }
 .stats__h2h-seg--draw {
-  background: var(--line);
+  background: rgba(244, 247, 251, 0.35);
 }
 .stats__h2h-seg--away {
   background: var(--accent2);
