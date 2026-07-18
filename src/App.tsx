@@ -8,6 +8,7 @@ import { MatchHeader } from './ui/MatchHeader'
 import { ProbabilityBars } from './ui/ProbabilityBars'
 import { ProbabilityChart } from './ui/ProbabilityChart'
 import { ModelSnapshot } from './ui/ModelSnapshot'
+import { LineupCard } from './ui/LineupCard'
 import { EventFeed } from './ui/EventFeed'
 import { SimControls } from './ui/SimControls'
 import { Footer } from './ui/Footer'
@@ -53,6 +54,7 @@ export default function App() {
           <ProbabilityChart history={history} events={match.events} />
           <ModelSnapshot match={match} prediction={prediction} />
         </div>
+        {match.lineups && <LineupCard teams={match.teams} lineups={match.lineups} />}
         <EventFeed events={match.events} />
         {supportsSimulation(provider) && <SimControls match={match} controls={provider} />}
       </main>

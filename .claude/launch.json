@@ -5,7 +5,8 @@
       "name": "matchcast",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 8791
+      "port": 8791,
+      "autoPort": true
     }
   ]
 }

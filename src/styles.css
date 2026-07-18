@@ -779,6 +779,114 @@ button {
 }
 
 /* ==========================================================================
+   LineupCard
+   ========================================================================== */
+
+.lineups {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lineups__legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+}
+
+.lineups__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+.lineups__label-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.lineups__label--home .lineups__label-swatch {
+  background: var(--accent);
+}
+.lineups__label--away .lineups__label-swatch {
+  background: var(--accent2);
+}
+
+.lineups__pitch-wrap {
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.lineups__pitch {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 340 / 520;
+}
+
+.lineups__field {
+  fill: #0b1c14;
+}
+
+.lineups__markings line,
+.lineups__markings rect,
+.lineups__markings circle,
+.lineups__markings path {
+  stroke: rgba(244, 247, 251, 0.28);
+  stroke-width: 1.5;
+}
+
+.lineups__spot {
+  fill: rgba(244, 247, 251, 0.28);
+  stroke: none;
+}
+
+.lineups__number {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 9px;
+  text-anchor: middle;
+  fill: #05080f;
+  pointer-events: none;
+}
+
+.lineups__name {
+  font-family: var(--font-body);
+  font-size: 8px;
+  text-anchor: middle;
+  fill: var(--text);
+  pointer-events: none;
+}
+
+.lineups__jersey {
+  stroke: rgba(5, 8, 15, 0.55);
+  stroke-width: 1.5;
+}
+
+.lineups__jersey--home {
+  fill: var(--accent);
+}
+.lineups__jersey--away {
+  fill: var(--accent2);
+}
+
+/* ==========================================================================
    SimControls
    ========================================================================== */
 

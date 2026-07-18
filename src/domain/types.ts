@@ -43,6 +43,19 @@ export interface Score {
   away: number
 }
 
+export interface LineupPlayer {
+  number: number
+  /** Short display name, e.g. "Mbappé". */
+  name: string
+}
+
+export interface TeamLineup {
+  /** e.g. "4-3-3" */
+  formation: string
+  /** 11 players: GK first, then defenders → forwards in line order, each line left→right. */
+  players: LineupPlayer[]
+}
+
 /** Full live state of the match — the single source of truth for rendering. */
 export interface Match {
   competition: string
@@ -61,6 +74,8 @@ export interface Match {
    */
   momentum: Record<TeamId, number>
   events: MatchEvent[]
+  /** Starting XIs, announced ~1h before kickoff — absent until then. */
+  lineups?: Record<TeamId, TeamLineup>
 }
 
 /** Pre-match model priors for the fixture. */

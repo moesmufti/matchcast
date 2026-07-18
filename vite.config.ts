@@ -5,6 +5,10 @@ import { cloudflare } from '@cloudflare/vite-plugin'
 export default defineConfig({
   plugins: [react(), cloudflare()],
   server: {
-    port: 8791,
+    // Respect the harness-assigned PORT (autoPort) without needing @types/node.
+    port: Number(
+      (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.PORT ??
+        8791,
+    ),
   },
 })
