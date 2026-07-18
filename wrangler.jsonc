@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "matchcast",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-07-01",
+  "assets": {
+    "not_found_handling": "single-page-application",
+  },
+  // Secrets for a real sports-data provider live server-side only:
+  //   wrangler secret put SPORTS_API_KEY
+  // They are then available on the Hono context env in worker/index.ts and
+  // must never be imported into src/ (browser) code.
+}

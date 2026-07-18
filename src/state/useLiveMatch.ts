@@ -1,0 +1,67 @@
+import { useEffect, useState } from 'react'
+import type { ConnectionStatus, Match, PredictionState, ProbabilitySnapshot } from '../domain/types'
+import { PRE_MATCH_MODEL } from '../domain/fixture'
+import { computePrediction } from '../domain/prediction'
+import type { LiveMatchProvider } from '../providers/LiveMatchProvider'
+
+const MAX_HISTORY = 120
+
+interface LiveMatchState {
+  match: Match | null
+  status: ConnectionStatus
+  prediction: PredictionState | null
+  history: ProbabilitySnapshot[]
+}
+
+const INITIAL_STATE: LiveMatchState = {
+  match: null,
+  status: 'connecting',
+  prediction: null,
+  history: [],
+}
+
+function isSnapshotEqual(a: ProbabilitySnapshot, b: ProbabilitySnapshot): boolean {
+  return a.minute === b.minute && a.home === b.home && a.draw === b.draw && a.away === b.away
+}
+
+/**
+ * Subscribes to a LiveMatchProvider and derives everything the UI needs:
+ * the raw match/status, the memoized prediction for the current match, and a
+ * capped history of probability snapshots for the momentum chart.
+ */
+export function useLiveMatch(provider: LiveMatchProvider): LiveMatchState {
+  const [state, setState] = useState<LiveMatchState>(INITIAL_STATE)
+
+  useEffect(() => {
+    const unsubscribe = provider.subscribe(({ match, status }) => {
+      setState((prev) => {
+        const prediction = computePrediction(match, PRE_MATCH_MODEL)
+        const snapshot: ProbabilitySnapshot = {
+          minute: match.minute,
+          home: prediction.probabilities.home,
+          draw: prediction.probabilities.draw,
+          away: prediction.probabilities.away,
+        }
+        const isReset = match.phase === 'pre-match' && match.events.length === 0
+
+        let history: ProbabilitySnapshot[]
+        if (isReset) {
+          history = [snapshot]
+        } else {
+          const last = prev.history[prev.history.length - 1]
+          const unchanged = last !== undefined && isSnapshotEqual(last, snapshot)
+          history = unchanged ? prev.history : [...prev.history, snapshot].slice(-MAX_HISTORY)
+        }
+
+        return { match, status, prediction, history }
+      })
+    })
+
+    return () => {
+      unsubscribe()
+      provider.dispose()
+    }
+  }, [provider])
+
+  return state
+}
