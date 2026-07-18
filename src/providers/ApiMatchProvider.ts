@@ -508,13 +508,23 @@ export function mapFeedToMatch(
               Math.floor(estimateMinuteFromKickoff(feed.utcDate, nowMs)),
             ),
           )
-        : feed.status === 'PENALTY_SHOOTOUT'
-          ? ET_SECOND_END
-          : feed.status === 'FINISHED' || feed.status === 'AWARDED'
-            ? feed.score.duration === 'EXTRA_TIME' || feed.score.duration === 'PENALTY_SHOOTOUT'
-              ? ET_SECOND_END
-              : REGULATION_MINUTES
-            : 0)
+        : feed.status === 'PAUSED'
+          ? // A null-minute PAUSED is one of the three breaks. The vendor
+            // posts each score block as it becomes relevant, which tells
+            // them apart: extraTime → the mid-ET breather, regularTime →
+            // the 90' pause before extra time, otherwise half-time.
+            feed.score.extraTime
+            ? ET_FIRST_END
+            : feed.score.regularTime
+              ? REGULATION_MINUTES
+              : HALF_MINUTES
+          : feed.status === 'PENALTY_SHOOTOUT'
+            ? ET_SECOND_END
+            : feed.status === 'FINISHED' || feed.status === 'AWARDED'
+              ? feed.score.duration === 'EXTRA_TIME' || feed.score.duration === 'PENALTY_SHOOTOUT'
+                ? ET_SECOND_END
+                : REGULATION_MINUTES
+              : 0)
 
   const period = resolvePeriod(feed, resolvedMinute)
   const phase = mapPhase(feed.status, period, resolvedMinute)

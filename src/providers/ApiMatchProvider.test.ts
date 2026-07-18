@@ -330,6 +330,56 @@ describe('mapFeedToMatch', () => {
     expect(match.possession).toEqual({ home: 58, away: 42 })
   })
 
+  it("resolves a null-minute PAUSED to the right break via score-block presence (regression: half-time showed 0')", () => {
+    // Free-tier half-time: minute null, only the halfTime score posted.
+    const halfTime = mapFeedToMatch(
+      baseFeed({
+        status: 'PAUSED',
+        minute: null,
+        score: { fullTime: { home: 0, away: 4 }, halfTime: { home: 0, away: 4 } },
+      }),
+      createInitialContext(),
+      NOW_MS,
+    ).match
+    expect(halfTime.phase).toBe('half-time')
+    expect(halfTime.minute).toBe(45)
+
+    // The 90' breather before extra time: regularTime score now posted.
+    const etBreak = mapFeedToMatch(
+      baseFeed({
+        status: 'PAUSED',
+        minute: null,
+        score: {
+          fullTime: { home: 1, away: 1 },
+          halfTime: { home: 1, away: 0 },
+          regularTime: { home: 1, away: 1 },
+        },
+      }),
+      createInitialContext(),
+      NOW_MS,
+    ).match
+    expect(etBreak.phase).toBe('extra-time-break')
+    expect(etBreak.minute).toBe(90)
+
+    // Between the extra-time periods: extraTime score present.
+    const etHalfTime = mapFeedToMatch(
+      baseFeed({
+        status: 'PAUSED',
+        minute: null,
+        score: {
+          fullTime: { home: 1, away: 1 },
+          halfTime: { home: 1, away: 0 },
+          regularTime: { home: 1, away: 1 },
+          extraTime: { home: 0, away: 0 },
+        },
+      }),
+      createInitialContext(),
+      NOW_MS,
+    ).match
+    expect(etHalfTime.phase).toBe('extra-time-half-time')
+    expect(etHalfTime.minute).toBe(105)
+  })
+
   it('maps FINISHED to full-time', () => {
     const feed = baseFeed({
       status: 'FINISHED',
