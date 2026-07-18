@@ -333,6 +333,62 @@ function buildLineups(home: LiveFeedTeam, away: LiveFeedTeam): Match['lineups'] 
   return FIXTURE.lineups
 }
 
+function normalizeName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
+/** Last whitespace-separated token — how the lineup card abbreviates names. */
+function lastNameToken(name: string): string {
+  const tokens = name.trim().split(/\s+/)
+  return tokens[tokens.length - 1]
+}
+
+/**
+ * Whether a lineup entry refers to the same player as a vendor name. The two
+ * spellings rarely agree exactly: vendor events carry full names ("Théo
+ * Hernandez") while the fixture-fallback lineups use card-style short ones
+ * ("T. Hernandez"), so fall back to comparing accent-stripped surnames.
+ */
+function playerMatches(lineupName: string, vendorName: string): boolean {
+  return (
+    normalizeName(lineupName) === normalizeName(vendorName) ||
+    normalizeName(lastNameToken(lineupName)) === normalizeName(lastNameToken(vendorName))
+  )
+}
+
+/**
+ * Swaps substituted players into the on-pitch lineups so the card shows who
+ * is actually playing, keeping the outgoing player's slot (and thus pitch
+ * position). Substitutes' shirt numbers aren't in the vendor's substitution
+ * records — 0 marks "unknown" and the card renders it as blank. Applied in
+ * minute order so chained subs (A→B, later B→C) resolve.
+ */
+function applySubstitutions(
+  lineups: Match['lineups'],
+  substitutions: LiveFeedPayload['substitutions'],
+  homeTeamId: number,
+): Match['lineups'] {
+  if (!lineups || substitutions.length === 0) return lineups
+
+  const next: NonNullable<Match['lineups']> = {
+    home: { ...lineups.home, players: [...lineups.home.players] },
+    away: { ...lineups.away, players: [...lineups.away.players] },
+  }
+
+  for (const sub of [...substitutions].sort((a, b) => a.minute - b.minute)) {
+    const side: TeamId = sub.team.id === homeTeamId ? 'home' : 'away'
+    const players = next[side].players
+    const index = players.findIndex((p) => playerMatches(p.name, sub.playerOut.name))
+    if (index === -1) continue
+    players[index] = { number: 0, name: lastNameToken(sub.playerIn.name) }
+  }
+
+  return next
+}
+
 interface ShotSynthesisResult {
   shots: Record<TeamId, ShotCounts>
   syntheticShotEvents: MatchEvent[]
@@ -712,7 +768,11 @@ export function mapFeedToMatch(
     return ra !== rb ? ra - rb : a.id.localeCompare(b.id)
   })
 
-  const lineups = buildLineups(feed.homeTeam, feed.awayTeam)
+  const lineups = applySubstitutions(
+    buildLineups(feed.homeTeam, feed.awayTeam),
+    feed.substitutions,
+    homeTeamId,
+  )
 
   const matchWithoutMomentum: Match = {
     competition: FIXTURE.competition,

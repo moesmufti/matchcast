@@ -227,6 +227,50 @@ describe('mapFeedToMatch', () => {
     expect(third.context.syntheticGoalEvents.away).toHaveLength(0)
   })
 
+  it('swaps substituted players into the on-pitch lineup, matching short fixture names', () => {
+    const feed = baseFeed({
+      status: 'IN_PLAY',
+      minute: 60,
+      score: { fullTime: { home: 0, away: 0 }, halfTime: { home: 0, away: 0 } },
+      substitutions: [
+        {
+          minute: 58,
+          team: { id: 1, name: 'Home FC' },
+          playerOut: { id: 301, name: 'Kylian Mbappé' },
+          playerIn: { id: 302, name: 'Marcus Thuram' },
+        },
+        {
+          // Accent-stripped vendor spelling must still match fixture "Dembélé".
+          minute: 59,
+          team: { id: 1, name: 'Home FC' },
+          playerOut: { id: 303, name: 'Ousmane Dembele' },
+          playerIn: { id: 304, name: 'Michael Olise' },
+        },
+        {
+          minute: 59,
+          team: { id: 2, name: 'Away FC' },
+          playerOut: { id: 401, name: 'Kobbie Mainoo' },
+          playerIn: { id: 402, name: 'Cole Palmer' },
+        },
+      ],
+    })
+
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    const homeNames = match.lineups?.home.players.map((p) => p.name)
+    expect(homeNames).toContain('Thuram')
+    expect(homeNames).toContain('Olise')
+    expect(homeNames).not.toContain('Mbappé')
+    expect(homeNames).not.toContain('Dembélé')
+    // The incoming player takes the outgoing player's slot (pitch position);
+    // shirt number is unknown from the vendor's substitution record → 0.
+    expect(match.lineups?.home.players[9]).toEqual({ number: 0, name: 'Thuram' })
+
+    const awayNames = match.lineups?.away.players.map((p) => p.name)
+    expect(awayNames).toContain('Palmer')
+    expect(awayNames).not.toContain('Mainoo')
+  })
+
   it('maps FINISHED to full-time', () => {
     const feed = baseFeed({
       status: 'FINISHED',

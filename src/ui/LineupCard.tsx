@@ -156,11 +156,11 @@ export function LineupCard({ teams, lineups }: LineupCardProps) {
             />
           </g>
           <g className="lineups__team lineups__team--away">
-            {awayPlayers.map((p) => (
-              <g key={`away-${p.number}`} transform={`translate(${p.x}, ${p.y})`}>
+            {awayPlayers.map((p, i) => (
+              <g key={`away-${i}`} transform={`translate(${p.x}, ${p.y})`}>
                 <circle className="lineups__jersey lineups__jersey--away" r={11} />
                 <text className="lineups__number" y={4}>
-                  {p.number}
+                  {p.number || ''}
                 </text>
                 <text className="lineups__name" y={22}>
                   {p.name}
@@ -169,11 +169,11 @@ export function LineupCard({ teams, lineups }: LineupCardProps) {
             ))}
           </g>
           <g className="lineups__team lineups__team--home">
-            {homePlayers.map((p) => (
-              <g key={`home-${p.number}`} transform={`translate(${p.x}, ${p.y})`}>
+            {homePlayers.map((p, i) => (
+              <g key={`home-${i}`} transform={`translate(${p.x}, ${p.y})`}>
                 <circle className="lineups__jersey lineups__jersey--home" r={11} />
                 <text className="lineups__number" y={4}>
-                  {p.number}
+                  {p.number || ''}
                 </text>
                 <text className="lineups__name" y={22}>
                   {p.name}
