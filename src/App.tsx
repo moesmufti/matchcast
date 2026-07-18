@@ -9,6 +9,7 @@ import { MatchHeader } from './ui/MatchHeader'
 import { ProbabilityBars } from './ui/ProbabilityBars'
 import { ProbabilityChart } from './ui/ProbabilityChart'
 import { ModelSnapshot } from './ui/ModelSnapshot'
+import { MatchStatsCard } from './ui/MatchStatsCard'
 import { LineupCard } from './ui/LineupCard'
 import { EventFeed } from './ui/EventFeed'
 import { SimControls } from './ui/SimControls'
@@ -59,6 +60,7 @@ function Dashboard({ provider }: DashboardProps) {
           <ProbabilityChart history={history} events={match.events} />
           <ModelSnapshot match={match} prediction={prediction} />
         </div>
+        <MatchStatsCard match={match} />
         {match.lineups && <LineupCard teams={match.teams} lineups={match.lineups} />}
         <EventFeed events={match.events} />
         {supportsSimulation(provider) && <SimControls match={match} controls={provider} />}

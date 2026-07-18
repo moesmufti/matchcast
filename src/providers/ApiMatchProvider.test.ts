@@ -278,6 +278,39 @@ describe('mapFeedToMatch', () => {
     expect(match.lineups?.away.bench?.map((p) => p.name)).not.toContain('Palmer')
   })
 
+  it('passes half-time score, officials, attendance and head-to-head through to the match', () => {
+    const feed = baseFeed({
+      status: 'IN_PLAY',
+      minute: 60,
+      score: { fullTime: { home: 1, away: 0 }, halfTime: { home: 1, away: 0 } },
+      attendance: 65432,
+      referee: 'Szymon Marciniak',
+      head2head: { played: 31, totalGoals: 96, homeWins: 9, draws: 5, awayWins: 17 },
+    })
+
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    expect(match.halfTimeScore).toEqual({ home: 1, away: 0 })
+    expect(match.referee).toBe('Szymon Marciniak')
+    expect(match.attendance).toBe(65432)
+    expect(match.headToHead).toEqual({
+      played: 31,
+      totalGoals: 96,
+      wins: { home: 9, away: 17 },
+      draws: 5,
+    })
+  })
+
+  it('leaves the optional stats fields absent when the feed omits them', () => {
+    const feed = baseFeed({ status: 'IN_PLAY', minute: 10 })
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+
+    expect(match.halfTimeScore).toBeUndefined()
+    expect(match.referee).toBeUndefined()
+    expect(match.attendance).toBeUndefined()
+    expect(match.headToHead).toBeUndefined()
+  })
+
   it('maps FINISHED to full-time', () => {
     const feed = baseFeed({
       status: 'FINISHED',

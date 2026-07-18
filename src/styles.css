@@ -967,6 +967,144 @@ button {
 }
 
 /* ==========================================================================
+   Match stats
+   ========================================================================== */
+
+.stats {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stats__rows,
+.stats__h2h {
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stats__teams {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stats__team--home {
+  color: var(--accent);
+}
+.stats__team--away {
+  color: var(--accent2);
+}
+
+.stats__row {
+  display: grid;
+  grid-template-columns: 2.5em 1fr 2.5em;
+  align-items: center;
+  gap: 12px;
+}
+
+.stats__value {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats__mid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.stats__label {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.stats__bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent2);
+  overflow: hidden;
+}
+
+.stats__bar:not(:has(.stats__bar-home)) {
+  background: var(--line);
+}
+
+.stats__bar-home {
+  height: 100%;
+  background: var(--accent);
+}
+
+.stats__h2h {
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.stats__h2h-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.stats__h2h-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.stats__h2h-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.stats__h2h-seg--home {
+  background: var(--accent);
+}
+.stats__h2h-seg--draw {
+  background: var(--line);
+}
+.stats__h2h-seg--away {
+  background: var(--accent2);
+}
+
+.stats__h2h-sub,
+.stats__meta {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.stats__meta {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+/* ==========================================================================
    SimControls
    ========================================================================== */
 

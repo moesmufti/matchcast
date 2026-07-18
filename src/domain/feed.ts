@@ -93,6 +93,15 @@ export interface LiveFeedTeam {
   statistics?: LiveFeedTeamStatistics
 }
 
+/** All-time head-to-head aggregates, from the fixture's perspective (home = this match's home side). */
+export interface LiveFeedHead2Head {
+  played: number
+  totalGoals: number
+  homeWins: number
+  draws: number
+  awayWins: number
+}
+
 export interface LiveFeedPayload {
   status: VendorMatchStatus
   /** 0 at kickoff; null has been observed on the free tier. */
@@ -100,6 +109,11 @@ export interface LiveFeedPayload {
   injuryTime: number | null
   utcDate: string
   venue?: string
+  /** Typically appears once the vendor records it (often at/after full-time). */
+  attendance?: number | null
+  /** The main match official's name, when the vendor lists officials. */
+  referee?: string | null
+  head2head?: LiveFeedHead2Head
   score: {
     fullTime: { home: number | null; away: number | null }
     halfTime: { home: number | null; away: number | null }

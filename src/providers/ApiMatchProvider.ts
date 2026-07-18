@@ -792,11 +792,27 @@ export function mapFeedToMatch(
     homeTeamId,
   )
 
+  const halfTimeScore: Score | undefined =
+    feed.score.halfTime.home !== null && feed.score.halfTime.away !== null
+      ? { home: feed.score.halfTime.home, away: feed.score.halfTime.away }
+      : undefined
+
   const matchWithoutMomentum: Match = {
     competition: FIXTURE.competition,
     round: FIXTURE.round,
     venue: feed.venue ?? FIXTURE.venue,
     kickoffIso: feed.utcDate,
+    referee: feed.referee ?? undefined,
+    attendance: feed.attendance ?? undefined,
+    headToHead: feed.head2head
+      ? {
+          played: feed.head2head.played,
+          totalGoals: feed.head2head.totalGoals,
+          wins: { home: feed.head2head.homeWins, away: feed.head2head.awayWins },
+          draws: feed.head2head.draws,
+        }
+      : undefined,
+    halfTimeScore,
     teams,
     phase,
     knockout: FIXTURE.knockout,

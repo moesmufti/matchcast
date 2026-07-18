@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type {
   LiveFeedBooking,
   LiveFeedGoal,
+  LiveFeedHead2Head,
   LiveFeedPayload,
   LiveFeedPenaltyKick,
   LiveFeedResponse,
@@ -48,6 +49,13 @@ interface VendorCacheEntry {
 // and the last vendor response.
 let discoveredMatchId: string | null = null
 let vendorCache: VendorCacheEntry | null = null
+
+// Head-to-head is static for the life of a fixture, so one successful vendor
+// call serves the whole isolate. Failures back off for a cooldown rather than
+// piggybacking a doomed extra request onto every poll.
+const H2H_RETRY_COOLDOWN_MS = 5 * 60_000
+let h2hCache: LiveFeedHead2Head | null = null
+let h2hLastFailedAt = 0
 
 // --- raw vendor shapes (football-data.org v4) ------------------------------
 
@@ -115,12 +123,19 @@ interface VendorTeam {
   statistics?: VendorTeamStatistics
 }
 
+interface VendorReferee {
+  name: string
+  type?: string
+}
+
 interface VendorMatchBody {
   status: VendorMatchStatus
   minute: number | null
   injuryTime: number | null
   utcDate: string
   venue?: string
+  attendance?: number | null
+  referees?: VendorReferee[]
   score?: {
     fullTime?: { home: number | null; away: number | null }
     halfTime?: { home: number | null; away: number | null }
@@ -140,6 +155,15 @@ interface VendorMatchBody {
 
 interface VendorDiscoveryBody {
   matches?: Array<{ id: number }>
+}
+
+interface VendorHead2HeadBody {
+  aggregates?: {
+    numberOfMatches: number
+    totalGoals: number
+    homeTeam: { id: number; wins: number; draws: number; losses: number }
+    awayTeam: { id: number; wins: number; draws: number; losses: number }
+  }
 }
 
 function isoDate(d: Date): string {
@@ -188,6 +212,36 @@ async function fetchMatchBody(matchId: string, apiKey: string): Promise<VendorMa
   const body = (await res.json()) as VendorMatchBody
   vendorCache = { fetchedAt: now, body }
   return body
+}
+
+/**
+ * All-time head-to-head aggregates for the fixture (free tier includes this
+ * endpoint). Best-effort: any failure returns undefined and the match payload
+ * simply omits the block.
+ */
+async function fetchHead2Head(matchId: string, apiKey: string): Promise<LiveFeedHead2Head | null> {
+  if (h2hCache) return h2hCache
+  if (Date.now() - h2hLastFailedAt < H2H_RETRY_COOLDOWN_MS) return null
+
+  try {
+    const res = await vendorFetch(`/matches/${matchId}/head2head?limit=100`, apiKey)
+    if (!res.ok) throw new Error(`Vendor head2head fetch failed with status ${res.status}.`)
+    const body = (await res.json()) as VendorHead2HeadBody
+    const agg = body.aggregates
+    if (!agg) throw new Error('Vendor head2head response has no aggregates.')
+
+    h2hCache = {
+      played: agg.numberOfMatches,
+      totalGoals: agg.totalGoals,
+      homeWins: agg.homeTeam.wins,
+      draws: agg.homeTeam.draws,
+      awayWins: agg.awayTeam.wins,
+    }
+    return h2hCache
+  } catch {
+    h2hLastFailedAt = Date.now()
+    return null
+  }
 }
 
 function toFeedTeam(team: VendorTeam): LiveFeedTeam {
@@ -253,13 +307,24 @@ function toFeedPenaltyKick(k: VendorPenaltyKick): LiveFeedPenaltyKick {
   }
 }
 
-function toFeedPayload(body: VendorMatchBody): LiveFeedPayload {
+function toFeedPayload(
+  body: VendorMatchBody,
+  head2head: LiveFeedHead2Head | null,
+): LiveFeedPayload {
+  // The named REFEREE is the man/woman in the middle; assistants, fourth
+  // officials and VAR share the same array under other `type` values.
+  const referee =
+    body.referees?.find((r) => r.type === 'REFEREE')?.name ?? body.referees?.[0]?.name ?? null
+
   return {
     status: body.status,
     minute: body.minute ?? null,
     injuryTime: body.injuryTime ?? null,
     utcDate: body.utcDate,
     venue: body.venue,
+    attendance: body.attendance ?? null,
+    referee,
+    head2head: head2head ?? undefined,
     score: {
       fullTime: {
         home: body.score?.fullTime?.home ?? null,
@@ -318,7 +383,8 @@ app.get('/api/match', async (c) => {
     }
 
     const vendorBody = await fetchMatchBody(matchId, apiKey)
-    const feed = toFeedPayload(vendorBody)
+    const head2head = await fetchHead2Head(matchId, apiKey)
+    const feed = toFeedPayload(vendorBody, head2head)
 
     c.header('Cache-Control', 'no-store')
     return c.json<LiveFeedResponse>({ configured: true, ok: true, feed })

@@ -85,6 +85,14 @@ export interface PenaltyShootout {
   winner: TeamId | null
 }
 
+/** All-time head-to-head record between the two sides. */
+export interface HeadToHead {
+  played: number
+  totalGoals: number
+  wins: Record<TeamId, number>
+  draws: number
+}
+
 export interface LineupPlayer {
   number: number
   /** Short display name, e.g. "Mbappé". */
@@ -129,6 +137,8 @@ export interface Match {
   }
   /** Goals in open play — regulation plus extra time, never shootout kicks. */
   score: Score
+  /** Score at the interval; absent until half-time is reached. */
+  halfTimeScore?: Score
   /** Penalty-shootout state; absent until the shootout starts. */
   penalties?: PenaltyShootout
   redCards: Record<TeamId, number>
@@ -143,6 +153,12 @@ export interface Match {
   events: MatchEvent[]
   /** Starting XIs, announced ~1h before kickoff — absent until then. */
   lineups?: Record<TeamId, TeamLineup>
+  /** The main match official, when known. */
+  referee?: string
+  /** Recorded attendance, when the data source reports it. */
+  attendance?: number
+  /** All-time record between the sides, when the data source provides it. */
+  headToHead?: HeadToHead
 }
 
 /** Pre-match model priors for the fixture. */
