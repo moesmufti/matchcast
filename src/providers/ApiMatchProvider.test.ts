@@ -176,6 +176,57 @@ describe('mapFeedToMatch', () => {
     expect(second.match.momentum.home).toBeGreaterThan(0)
   })
 
+  it('synthesizes a placeholder goal event when the score leads the itemized goals, then yields to the real one', () => {
+    // Score says 0-1 but `goals` is still empty — the free tier updates the
+    // score minutes before it itemizes the scorer.
+    const firstFeed = baseFeed({
+      status: 'IN_PLAY',
+      minute: 10,
+      score: { fullTime: { home: 0, away: 1 }, halfTime: { home: null, away: null } },
+    })
+    const first = mapFeedToMatch(firstFeed, createInitialContext(), NOW_MS)
+
+    const placeholder = first.match.events.find((e) => e.type === 'goal')
+    expect(placeholder?.team).toBe('away')
+    expect(placeholder?.minute).toBe(10)
+    expect(placeholder?.description).toContain('scorer to be confirmed')
+    // A goal is the strongest momentum signal — the placeholder must feed it.
+    expect(first.match.momentum.away).toBeGreaterThan(0)
+
+    // The placeholder keeps its first-seen minute on later polls.
+    const secondFeed = baseFeed({
+      status: 'IN_PLAY',
+      minute: 14,
+      score: { fullTime: { home: 0, away: 1 }, halfTime: { home: null, away: null } },
+    })
+    const second = mapFeedToMatch(secondFeed, first.context, NOW_MS)
+    const held = second.match.events.filter((e) => e.type === 'goal')
+    expect(held).toHaveLength(1)
+    expect(held[0].minute).toBe(10)
+
+    // Once the vendor itemizes the goal, the placeholder disappears and only
+    // the real event (with the scorer) remains.
+    const thirdFeed = baseFeed({
+      status: 'IN_PLAY',
+      minute: 15,
+      score: { fullTime: { home: 0, away: 1 }, halfTime: { home: null, away: null } },
+      goals: [
+        {
+          minute: 9,
+          injuryTime: null,
+          team: { id: 2, name: 'Away FC' },
+          scorer: { id: 201, name: 'Winger' },
+          assist: null,
+        },
+      ],
+    })
+    const third = mapFeedToMatch(thirdFeed, second.context, NOW_MS)
+    const goals = third.match.events.filter((e) => e.type === 'goal')
+    expect(goals).toHaveLength(1)
+    expect(goals[0].description).toContain('Winger')
+    expect(third.context.syntheticGoalEvents.away).toHaveLength(0)
+  })
+
   it('maps FINISHED to full-time', () => {
     const feed = baseFeed({
       status: 'FINISHED',

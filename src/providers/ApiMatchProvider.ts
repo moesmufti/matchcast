@@ -50,6 +50,14 @@ export interface MapContext {
   previousShots: Record<TeamId, ShotCounts>
   syntheticShotEvents: MatchEvent[]
   syntheticShotCounter: Record<TeamId, number>
+  /**
+   * "Scorer to be confirmed" goal events synthesized when the vendor's score
+   * has moved ahead of its itemized `goals` array (the free tier updates the
+   * score first and itemizes the goal later, sometimes minutes later). Kept
+   * per side and persisted across polls so each keeps the minute it was first
+   * seen at; trimmed again as the vendor itemizes (or VAR disallows).
+   */
+  syntheticGoalEvents: Record<TeamId, MatchEvent[]>
   announcedStoppage: {
     firstHalf: number | null
     secondHalf: number | null
@@ -66,6 +74,7 @@ export function createInitialContext(): MapContext {
     },
     syntheticShotEvents: [],
     syntheticShotCounter: { home: 0, away: 0 },
+    syntheticGoalEvents: { home: [], away: [] },
     announcedStoppage: {
       firstHalf: null,
       secondHalf: null,
@@ -477,6 +486,35 @@ export function mapFeedToMatch(
     }
   })
 
+  // The vendor moves `score.fullTime` before it itemizes the goal in
+  // `goals` (on the free tier the scorer detail can trail by minutes). Any
+  // score not covered by an itemized goal gets a placeholder event at the
+  // minute the delta was first observed — without it the feed (and goal-led
+  // momentum) misses the most important event of the match. Re-derived from
+  // the gap each poll: itemization shrinks it (the real event takes over),
+  // as does a VAR-disallowed goal.
+  const vendorGoalCounts: Record<TeamId, number> = { home: 0, away: 0 }
+  for (const g of feed.goals) {
+    vendorGoalCounts[g.team.id === homeTeamId ? 'home' : 'away'] += 1
+  }
+  const syntheticGoalEvents: Record<TeamId, MatchEvent[]> = { home: [], away: [] }
+  for (const side of ['home', 'away'] as const) {
+    const unitemized = Math.max(0, score[side] - vendorGoalCounts[side])
+    const kept = context.syntheticGoalEvents[side].slice(0, unitemized)
+    while (kept.length < unitemized) {
+      kept.push({
+        id: `goal-unconfirmed-${side}-${kept.length + 1}`,
+        minute: clock.minute,
+        stoppageMinute: clock.stoppageMinute,
+        type: 'goal',
+        team: side,
+        description: `GOAL! ${teams[side].name} — scorer to be confirmed.`,
+        modelReaction: `${teams[side].name} score. Win probability shifts sharply in their favour.`,
+      })
+    }
+    syntheticGoalEvents[side] = kept
+  }
+
   const bookingEvents: MatchEvent[] = feed.bookings.map((b) => {
     const team: TeamId = b.team.id === homeTeamId ? 'home' : 'away'
     const isRed = b.card === 'RED' || b.card === 'YELLOW_RED'
@@ -659,6 +697,8 @@ export function mapFeedToMatch(
   const events = [
     ...markerEvents,
     ...goalEvents,
+    ...syntheticGoalEvents.home,
+    ...syntheticGoalEvents.away,
     ...bookingEvents,
     ...subEvents,
     ...shotResult.syntheticShotEvents,
@@ -702,6 +742,7 @@ export function mapFeedToMatch(
     previousShots: shotResult.shots,
     syntheticShotEvents: shotResult.syntheticShotEvents,
     syntheticShotCounter: shotResult.syntheticShotCounter,
+    syntheticGoalEvents,
     announcedStoppage: clock.announcedStoppage,
   }
 
