@@ -1,6 +1,6 @@
 # MatchCast
 
-Live match prediction dashboard for the FIFA World Cup third-place match — **France vs England**, 18 July 2026, 23:00 (Europe/Amsterdam), Miami. Renders live win probabilities, a probability-history chart, a model snapshot, and an event feed, driven by a deterministic prediction engine over a simulated live feed.
+Live match prediction dashboard for the FIFA World Cup third-place match — **France vs England**, 18 July 2026, 23:00 (Europe/Amsterdam), Miami. Renders live win probabilities, a probability-history chart, a model snapshot, and an event feed, driven by a deterministic prediction engine over either a **real live feed** (football-data.org, proxied through the Worker) or a realistic client-side simulation.
 
 > All numbers are **model estimates** for entertainment — not betting advice.
 
@@ -9,27 +9,42 @@ Live match prediction dashboard for the FIFA World Cup third-place match — **F
 ```
 worker/index.ts                  Hono app on Cloudflare Workers — serves /api/*,
                                  static assets via the Workers assets binding.
-                                 Real sports-data keys live here (wrangler secrets),
-                                 never in browser code.
+                                 Proxies football-data.org (v4) with the API key
+                                 held server-side (wrangler secret), a 10 s
+                                 shared vendor cache, and match-id discovery.
 
-src/domain/types.ts              Typed domain models: Match, Team, MatchEvent,
-                                 PredictionState, ProbabilitySnapshot, ...
+src/domain/types.ts              Typed domain models: Match (incl. stoppage clock,
+                                 shot counts), Team, MatchEvent, PredictionState, ...
 src/domain/fixture.ts            Pre-match priors + initial match state for this fixture.
+src/domain/clock.ts              Stoppage-aware clock helpers ("45+2'", effective
+                                 minutes, expected added time). Pure.
+src/domain/momentum.ts           Shot-based momentum: recency-weighted sum of recent
+                                 shots/goals per team. Pure, deterministic. Unit-tested.
 src/domain/prediction.ts         Pure, deterministic prediction engine (Poisson model
-                                 over remaining xG, adjusted for score, clock, red
-                                 cards, momentum). No I/O, no randomness. Unit-tested.
+                                 over remaining xG, adjusted for score, stoppage-aware
+                                 clock, red cards, momentum). No I/O, no randomness.
+src/domain/feed.ts               Types for the trimmed vendor payload the worker
+                                 returns to the browser (no runtime code).
 
 src/providers/LiveMatchProvider.ts   Source-agnostic provider contract + optional
                                      SimulationControls capability interface.
-src/providers/SimulatedMatchProvider.ts  Simulated live feed (clock, ambient events,
-                                         manual event injection).
-src/providers/ApiMatchProvider.ts        Documented stub for a real live-data feed.
+src/providers/SimulatedMatchProvider.ts  Realistic simulation: shot-driven goals
+                                         calibrated to the pre-match xG, announced
+                                         stoppage time, speed control (1×/15×/60×),
+                                         manual event injection.
+src/providers/ApiMatchProvider.ts        Real polling client for /api/match: maps the
+                                         vendor feed to the domain Match (clock,
+                                         events, red cards, lineups), synthesizes
+                                         shot events from shot-count deltas so live
+                                         momentum stays shot-based.
 
 src/state/useLiveMatch.ts        React hook: subscribes to a provider, computes the
                                  prediction per update, tracks probability history.
 src/ui/*                         Presentational components (header, bars, SVG chart,
-                                 snapshot, event feed, sim controls).
-src/App.tsx                      Wires one provider into the hook and composes the page.
+                                 snapshot, line-ups, event feed, sim controls).
+src/App.tsx                      Picks the provider (live when configured, else
+                                 simulation; ?source=sim|live overrides) and
+                                 composes the page.
 ```
 
 Live match state is fully separated from rendering: the UI renders only from
@@ -57,14 +72,34 @@ npm run deploy     # builds, then `wrangler deploy`
 The Vite Cloudflare plugin outputs the client bundle as Worker static assets and
 bundles `worker/index.ts` as the Worker entry (see `wrangler.jsonc`).
 
-## Replacing the simulator with a real live-data feed
+## Going live (real data)
 
-1. Get a sports-data API key and store it server-side:
-   `wrangler secret put SPORTS_API_KEY` (available as `c.env.SPORTS_API_KEY` in the worker).
-2. Implement the proxy in `worker/index.ts` (`GET /api/match`): call the vendor API,
-   map its payload into the `Match` domain model, return JSON. The browser never
-   sees the key — it only talks to `/api/*`.
-3. Flesh out `src/providers/ApiMatchProvider.ts` (polling or SSE against `/api/match`).
-4. In `src/App.tsx`, swap `new SimulatedMatchProvider()` for `new ApiMatchProvider()`.
-   Simulation controls disappear automatically — the UI feature-detects them via
-   `supportsSimulation()`.
+The live path is fully implemented against **football-data.org v4** (the FIFA
+World Cup is included in their free tier):
+
+1. Get a token at football-data.org and store it server-side:
+
+   ```sh
+   wrangler secret put SPORTS_API_KEY     # locally: put it in .dev.vars instead
+   ```
+
+2. Optionally pin the vendor match id via `vars.SPORTS_MATCH_ID` in
+   `wrangler.jsonc`. If unset, the worker discovers the WC third-place fixture
+   for today ± 1 day automatically (`stage=THIRD_PLACE`).
+3. `npm run deploy`.
+
+The app then auto-selects the live provider (it asks `/api/health`); without a
+key it falls back to the simulation. Force either mode with `?source=live` or
+`?source=sim`. The browser only ever talks to same-origin `/api/*` — the key
+never reaches client code. The worker caches the vendor response for 10 s so
+any number of viewers stay within the free tier's 10 requests/min.
+
+## Known limitations
+
+- Extra time and penalty shoot-outs aren't modeled: vendor statuses
+  `EXTRA_TIME`/`PENALTY_SHOOTOUT` are folded into a late second half.
+- The free vendor tier may delay live scores slightly, and per-team shot
+  statistics (which feed live momentum) may be tier-gated — without them,
+  live momentum rides on goals only.
+- Simulation randomness lives in the providers; the prediction engine itself
+  stays pure and deterministic.

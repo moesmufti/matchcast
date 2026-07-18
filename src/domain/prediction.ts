@@ -1,4 +1,5 @@
 import type { Match, PredictionState, PreMatchModel, TeamId } from './types'
+import { expectedStoppage } from './clock'
 
 /**
  * Deterministic, explainable prediction engine.
@@ -11,6 +12,11 @@ import type { Match, PredictionState, PreMatchModel, TeamId } from './types'
  *    cards, and momentum), then a Poisson model of remaining goals for each
  *    team is combined with the current score to derive outcome
  *    probabilities, BTTS, over/under, and a projected final score.
+ *
+ * Time left is stoppage-aware: each half is expected to run past 45/90 by
+ * the fourth official's announced added time (or a typical default before
+ * the board goes up), and during stoppage the clock runs down toward the
+ * whistle without ever reaching certainty until phase is `full-time`.
  *
  * Everything here is a pure function of its inputs: no randomness, no
  * wall-clock reads. Same (match, preMatch) in, same PredictionState out.
@@ -58,8 +64,15 @@ export function normalizeToHundred(values: [number, number, number]): [number, n
   return result
 }
 
-const FULL_MATCH_MINUTES = 90
+const REGULATION_MINUTES = 90
+const HALF_MINUTES = 45
 const MAX_REMAINING_GOALS = 10
+/**
+ * While stoppage time is being played past the announced/expected added
+ * minutes, keep at least this much model time on the clock — the outcome
+ * only becomes certain at the whistle (phase full-time), not before.
+ */
+const MIN_STOPPAGE_REMAINING = 0.5
 
 // Tuning constants for the explainable model.
 const RED_CARD_OWN_FACTOR = 0.62 // own remaining xG multiplier per red card
@@ -71,6 +84,35 @@ const NEXT_GOAL_LEAN_EPSILON = 0.05 // xG/remaining-match difference treated as 
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
+}
+
+function stoppageRemaining(expected: number, played: number): number {
+  return Math.max(expected - played, MIN_STOPPAGE_REMAINING)
+}
+
+/** Expected playing minutes still to come, stoppage-aware. */
+function remainingMinutes(match: Match): number {
+  const { firstHalf, secondHalf } = expectedStoppage(match)
+  const restOfSecondHalf = HALF_MINUTES + secondHalf
+
+  switch (match.phase) {
+    case 'pre-match':
+      return REGULATION_MINUTES + firstHalf + secondHalf
+    case 'first-half':
+      if (match.minute >= HALF_MINUTES) {
+        return stoppageRemaining(firstHalf, match.stoppageMinute) + restOfSecondHalf
+      }
+      return HALF_MINUTES - match.minute + firstHalf + restOfSecondHalf
+    case 'half-time':
+      return restOfSecondHalf
+    case 'second-half':
+      if (match.minute >= REGULATION_MINUTES) {
+        return stoppageRemaining(secondHalf, match.stoppageMinute)
+      }
+      return REGULATION_MINUTES - match.minute + secondHalf
+    case 'full-time':
+      return 0
+  }
 }
 
 function opponent(team: TeamId): TeamId {
@@ -116,9 +158,9 @@ export function computePrediction(match: Match, preMatch: PreMatchModel): Predic
   }
 
   const isFullTime = match.phase === 'full-time'
-  const fractionRemaining = isFullTime
-    ? 0
-    : clamp((FULL_MATCH_MINUTES - match.minute) / FULL_MATCH_MINUTES, 0, 1)
+  const stoppage = expectedStoppage(match)
+  const totalExpectedMinutes = REGULATION_MINUTES + stoppage.firstHalf + stoppage.secondHalf
+  const fractionRemaining = clamp(remainingMinutes(match) / totalExpectedMinutes, 0, 1)
 
   const lambdaHome = remainingXg('home', preMatch, match, fractionRemaining)
   const lambdaAway = remainingXg('away', preMatch, match, fractionRemaining)
@@ -191,7 +233,7 @@ export function computePrediction(match: Match, preMatch: PreMatchModel): Predic
 
   const percentages = [home, draw, away].sort((a, b) => b - a)
   const separation = percentages[0] - percentages[1]
-  const elapsedFraction = clamp(match.minute / FULL_MATCH_MINUTES, 0, 1)
+  const elapsedFraction = clamp(1 - fractionRemaining, 0, 1)
   let confidence = clamp(3 + (separation / 100) * 4 + elapsedFraction * 3, 0, 10)
   confidence = Math.round(confidence * 10) / 10
 

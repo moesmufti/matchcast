@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ConnectionStatus } from './domain/types'
 import { useLiveMatch } from './state/useLiveMatch'
 import { SimulatedMatchProvider } from './providers/SimulatedMatchProvider'
-import { supportsSimulation } from './providers/LiveMatchProvider'
+import { ApiMatchProvider } from './providers/ApiMatchProvider'
+import { supportsSimulation, type LiveMatchProvider } from './providers/LiveMatchProvider'
 import { TopBar } from './ui/TopBar'
 import { MatchHeader } from './ui/MatchHeader'
 import { ProbabilityBars } from './ui/ProbabilityBars'
@@ -19,8 +20,11 @@ const NOTICE_COPY: Partial<Record<ConnectionStatus, string>> = {
   stale: 'Live feed data looks stale — attempting to reconnect.',
 }
 
-export default function App() {
-  const [provider] = useState(() => new SimulatedMatchProvider())
+interface DashboardProps {
+  provider: LiveMatchProvider
+}
+
+function Dashboard({ provider }: DashboardProps) {
   const { match, status, prediction, history } = useLiveMatch(provider)
 
   if (!match || !prediction) {
@@ -58,7 +62,65 @@ export default function App() {
         <EventFeed events={match.events} />
         {supportsSimulation(provider) && <SimControls match={match} controls={provider} />}
       </main>
-      <Footer />
+      <Footer simulated={supportsSimulation(provider)} />
     </div>
   )
+}
+
+/**
+ * Picks which provider drives the dashboard:
+ *  - `?source=sim` forces the client-side simulator.
+ *  - `?source=live` forces the real polling provider.
+ *  - otherwise, ask the worker via `/api/health` and use the real provider
+ *    when `liveConfigured` is true, falling back to the simulator (including
+ *    on a failed health check — e.g. offline dev, worker not running).
+ */
+async function chooseProvider(): Promise<LiveMatchProvider> {
+  const params = new URLSearchParams(window.location.search)
+  const source = params.get('source')
+
+  if (source === 'sim') return new SimulatedMatchProvider()
+  if (source === 'live') return new ApiMatchProvider()
+
+  try {
+    const response = await fetch('/api/health')
+    if (!response.ok) return new SimulatedMatchProvider()
+    const body = (await response.json()) as { ok: boolean; liveConfigured?: boolean }
+    return body.liveConfigured ? new ApiMatchProvider() : new SimulatedMatchProvider()
+  } catch {
+    return new SimulatedMatchProvider()
+  }
+}
+
+export default function App() {
+  const [provider, setProvider] = useState<LiveMatchProvider | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let created: LiveMatchProvider | null = null
+
+    void chooseProvider().then((chosen) => {
+      if (cancelled) {
+        chosen.dispose()
+        return
+      }
+      created = chosen
+      setProvider(chosen)
+    })
+
+    return () => {
+      cancelled = true
+      created?.dispose()
+    }
+  }, [])
+
+  if (!provider) {
+    return (
+      <div className="app app--loading">
+        <p>Loading match model…</p>
+      </div>
+    )
+  }
+
+  return <Dashboard provider={provider} />
 }

@@ -1,30 +1,86 @@
 import type { Match, MatchEvent, MatchEventType, TeamId } from '../domain/types'
-import { createInitialMatch } from '../domain/fixture'
+import { createInitialMatch, PRE_MATCH_MODEL } from '../domain/fixture'
+import { DEFAULT_STOPPAGE, matchEffectiveMinute } from '../domain/clock'
+import { computeMomentum } from '../domain/momentum'
 import type { LiveMatchProvider, MatchUpdate, SimulationControls } from './LiveMatchProvider'
 
-const DEFAULT_TICK_MS = 1200
 const HALF_TIME_MINUTE = 45
 const FULL_TIME_MINUTE = 90
 const SUBSTITUTION_MIN_MINUTE = 55
 
-const MOMENTUM_DECAY = 0.9
-const MOMENTUM_CHANCE_BUMP = 0.35
-const MOMENTUM_GOAL_BUMP = 0.5
+const SUPPORTED_SPEEDS = [1, 15, 60] as const
+type Speed = (typeof SUPPORTED_SPEEDS)[number]
+const DEFAULT_SPEED: Speed = 60
 
-// Ambient per-minute event probabilities while the sim is running.
-// ~0.014/team/min ≈ 2.5 goals per simulated match before momentum/red-card
-// adjustments — roughly the real-world scoring rate.
-const BASE_GOAL_CHANCE_PER_MINUTE = 0.014
-const CHANCE_EVENT_PROBABILITY = 0.08
+function isSupportedSpeed(value: number): value is Speed {
+  return (SUPPORTED_SPEEDS as readonly number[]).includes(value)
+}
+
+// --- Shot model ------------------------------------------------------------
+//
+// Shots drive goals (rather than a flat per-minute goal chance). Each team's
+// base shot rate is derived from its pre-match xG: xG = shots * xgPerShot, so
+// shotsPerMinute = (teamXg / XG_PER_SHOT) / TOTAL_EXPECTED_MINUTES.
+//
+// Sanity check (the calibration this is meant to preserve):
+//   shotsPerMinute * TOTAL_EXPECTED_MINUTES * XG_PER_SHOT ≈ teamXg
+//   home: 0.1374 * 98 * 0.13 ≈ 1.75   away: 0.0981 * 98 * 0.13 ≈ 1.25
+const XG_PER_SHOT = 0.13
+const TOTAL_EXPECTED_MINUTES = 98
+
+const BIG_CHANCE_PROBABILITY = 0.18
+const BIG_CHANCE_XG = 0.35
+const REGULAR_SHOT_XG = 0.08
+const BIG_CHANCE_ON_TARGET_PROBABILITY = 0.7
+const REGULAR_ON_TARGET_PROBABILITY = 0.32
+
+const RED_CARD_OWN_FACTOR = 0.62
+const RED_CARD_OPP_FACTOR = 1.25
+const MOMENTUM_SHOT_BOOST = 0.5
+const CHASE_START_MINUTE = 70
+const CHASE_TRAILING_FACTOR = 1.3
+const CHASE_LEADING_FACTOR = 0.85
+
 const YELLOW_CARD_PROBABILITY = 0.03
 const SUBSTITUTION_PROBABILITY = 0.03
+
+const EXTRA_STOPPAGE_MINUTE_PROBABILITY = 0.25
+
+type WeightedOption = readonly [value: number, weight: number]
+
+// Weights per spec: first half 2-5 min (20/35/30/15), second half 3-7 min
+// (10/25/30/20/15). Both sum to 100.
+const FIRST_HALF_STOPPAGE_WEIGHTS: readonly WeightedOption[] = [
+  [2, 20],
+  [3, 35],
+  [4, 30],
+  [5, 15],
+]
+const SECOND_HALF_STOPPAGE_WEIGHTS: readonly WeightedOption[] = [
+  [3, 10],
+  [4, 25],
+  [5, 30],
+  [6, 20],
+  [7, 15],
+]
+
+function weightedSample(options: readonly WeightedOption[]): number {
+  const total = options.reduce((sum, [, weight]) => sum + weight, 0)
+  let roll = Math.random() * total
+  for (const [value, weight] of options) {
+    if (roll < weight) return value
+    roll -= weight
+  }
+  return options[options.length - 1][0]
+}
 
 function opponent(team: TeamId): TeamId {
   return team === 'home' ? 'away' : 'home'
 }
 
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value))
+function baseShotsPerMinute(team: TeamId): number {
+  const teamXg = team === 'home' ? PRE_MATCH_MODEL.xgHome : PRE_MATCH_MODEL.xgAway
+  return teamXg / XG_PER_SHOT / TOTAL_EXPECTED_MINUTES
 }
 
 /**
@@ -33,7 +89,9 @@ function clamp01(value: number): number {
  * immutable snapshots to subscribers. The simulation itself is allowed to
  * use randomness for ambient events (ordinary football happening) — the
  * *prediction* model that consumes this data (src/domain/prediction.ts)
- * stays pure and deterministic.
+ * stays pure and deterministic, and so does the momentum model
+ * (src/domain/momentum.ts) — this provider only ever calls `computeMomentum`
+ * and stores the result, it never hand-tunes momentum values.
  */
 export class SimulatedMatchProvider implements LiveMatchProvider, SimulationControls {
   private match: Match = createInitialMatch()
@@ -41,10 +99,10 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
   private timer: ReturnType<typeof setInterval> | null = null
   private running = false
   private eventCounter = 0
-  private readonly tickMs: number
+  private speed: Speed
 
-  constructor(tickMs: number = DEFAULT_TICK_MS) {
-    this.tickMs = tickMs
+  constructor(initialSpeed: number = DEFAULT_SPEED) {
+    this.speed = isSupportedSpeed(initialSpeed) ? initialSpeed : DEFAULT_SPEED
   }
 
   subscribe(listener: (update: MatchUpdate) => void): () => void {
@@ -95,13 +153,15 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
 
   injectGoal(team: TeamId): void {
     if (!this.hasStarted()) return
+    this.recordShot(team, true)
     this.scoreGoal(team, 'A well-worked finish')
     this.emit(this.statusForCurrentState())
   }
 
   injectChance(team: TeamId): void {
     if (!this.hasStarted()) return
-    this.createChance(team)
+    this.recordShot(team, true)
+    this.recordShotOnTarget(team, true)
     this.emit(this.statusForCurrentState())
   }
 
@@ -113,15 +173,28 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
 
   advanceClock(minutes: number): void {
     if (!this.hasStarted()) return
-    const target = this.match.minute + Math.max(0, minutes)
-    while (this.match.minute < target && this.match.phase !== 'full-time') {
-      this.advanceOneMinute({ allowRandomEvents: false })
+    const steps = Math.max(0, Math.floor(minutes))
+    for (let i = 0; i < steps && this.match.phase !== 'full-time'; i++) {
+      this.advanceOneGameMinute(false)
     }
     this.emit(this.statusForCurrentState())
   }
 
   isRunning(): boolean {
     return this.running
+  }
+
+  setSpeed(multiplier: number): void {
+    if (!isSupportedSpeed(multiplier)) return
+    this.speed = multiplier
+    if (this.running) {
+      this.startTimer()
+    }
+    this.emit(this.statusForCurrentState())
+  }
+
+  getSpeed(): number {
+    return this.speed
   }
 
   // --- internals ---------------------------------------------------------
@@ -136,7 +209,7 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
 
   private startTimer(): void {
     this.stopTimer()
-    this.timer = setInterval(() => this.tick(), this.tickMs)
+    this.timer = setInterval(() => this.tick(), 60000 / this.speed)
   }
 
   private stopTimer(): void {
@@ -147,6 +220,17 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
   }
 
   private tick(): void {
+    this.advanceOneGameMinute(true)
+    this.emit(this.running ? 'live' : 'paused')
+
+    if (this.match.phase === 'full-time') {
+      this.stopTimer()
+      this.running = false
+    }
+  }
+
+  /** Advances the match by exactly one match-minute worth of state, whatever phase it's in. */
+  private advanceOneGameMinute(allowRandomEvents: boolean): void {
     if (this.match.phase === 'half-time') {
       // One tick of stoppage, then kick off the second half.
       this.match = { ...this.match, phase: 'second-half' }
@@ -156,63 +240,121 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
         description: 'Second half under way.',
         modelReaction: 'Remaining-time model resets its xG clock for the second 45.',
       })
-      this.emit('live')
       return
     }
 
-    this.advanceOneMinute({ allowRandomEvents: true })
-    this.emit(this.running ? 'live' : 'paused')
+    if (this.match.phase === 'first-half') {
+      this.tickFirstHalf(allowRandomEvents)
+      return
+    }
 
-    if (this.match.phase === 'full-time') {
-      this.stopTimer()
-      this.running = false
+    if (this.match.phase === 'second-half') {
+      this.tickSecondHalf(allowRandomEvents)
+      return
+    }
+
+    // pre-match / full-time: nothing to advance.
+  }
+
+  private tickFirstHalf(allowRandomEvents: boolean): void {
+    if (this.match.minute < HALF_TIME_MINUTE) {
+      const nextMinute = Math.min(HALF_TIME_MINUTE, this.match.minute + 1)
+      this.match = { ...this.match, minute: nextMinute }
+      if (allowRandomEvents) this.maybeRunAmbientEvents()
+      this.recomputeMomentum()
+
+      if (this.match.minute >= HALF_TIME_MINUTE) {
+        this.announceStoppage('firstHalf')
+      }
+      return
+    }
+
+    // Playing first-half stoppage time: minute holds at 45, stoppageMinute climbs.
+    const nextStoppageMinute = this.match.stoppageMinute + 1
+    this.match = { ...this.match, stoppageMinute: nextStoppageMinute }
+    if (allowRandomEvents) this.maybeRunAmbientEvents()
+    this.recomputeMomentum()
+
+    const announced = this.match.announcedStoppage.firstHalf ?? DEFAULT_STOPPAGE.firstHalf
+    const playExtraMinute =
+      nextStoppageMinute === announced && Math.random() < EXTRA_STOPPAGE_MINUTE_PROBABILITY
+    if (nextStoppageMinute >= announced && !playExtraMinute) {
+      this.blowHalfTime()
     }
   }
 
-  private advanceOneMinute({ allowRandomEvents }: { allowRandomEvents: boolean }): void {
-    if (this.match.phase === 'full-time') return
+  private tickSecondHalf(allowRandomEvents: boolean): void {
+    if (this.match.minute < FULL_TIME_MINUTE) {
+      const nextMinute = Math.min(FULL_TIME_MINUTE, this.match.minute + 1)
+      this.match = { ...this.match, minute: nextMinute }
+      if (allowRandomEvents) this.maybeRunAmbientEvents()
+      this.recomputeMomentum()
 
-    const nextMinute = Math.min(FULL_TIME_MINUTE, this.match.minute + 1)
-    this.match = { ...this.match, minute: nextMinute }
-    this.decayMomentum()
-
-    if (allowRandomEvents) {
-      this.maybeRunAmbientEvents()
-    }
-
-    if (this.match.minute >= HALF_TIME_MINUTE && this.match.phase === 'first-half') {
-      this.match = { ...this.match, phase: 'half-time' }
-      this.appendEvent({
-        minute: this.match.minute,
-        type: 'half-time',
-        description: 'Half-time whistle.',
-        modelReaction: 'Model holds probabilities steady until the second half resumes.',
-      })
+      if (this.match.minute >= FULL_TIME_MINUTE) {
+        this.announceStoppage('secondHalf')
+      }
       return
     }
 
-    if (this.match.minute >= FULL_TIME_MINUTE && this.match.phase === 'second-half') {
-      this.match = { ...this.match, phase: 'full-time' }
-      this.appendEvent({
-        minute: this.match.minute,
-        type: 'full-time',
-        description: 'Full-time whistle.',
-        modelReaction: 'Result is locked in — probabilities settle at the final outcome.',
-      })
+    // Playing second-half stoppage time: minute holds at 90, stoppageMinute climbs.
+    const nextStoppageMinute = this.match.stoppageMinute + 1
+    this.match = { ...this.match, stoppageMinute: nextStoppageMinute }
+    if (allowRandomEvents) this.maybeRunAmbientEvents()
+    this.recomputeMomentum()
+
+    const announced = this.match.announcedStoppage.secondHalf ?? DEFAULT_STOPPAGE.secondHalf
+    const playExtraMinute =
+      nextStoppageMinute === announced && Math.random() < EXTRA_STOPPAGE_MINUTE_PROBABILITY
+    if (nextStoppageMinute >= announced && !playExtraMinute) {
+      this.blowFullTime()
     }
+  }
+
+  private announceStoppage(half: 'firstHalf' | 'secondHalf'): void {
+    const minutes =
+      half === 'firstHalf'
+        ? weightedSample(FIRST_HALF_STOPPAGE_WEIGHTS)
+        : weightedSample(SECOND_HALF_STOPPAGE_WEIGHTS)
+
+    this.match = {
+      ...this.match,
+      announcedStoppage: { ...this.match.announcedStoppage, [half]: minutes },
+    }
+    this.appendEvent({
+      minute: this.match.minute,
+      type: 'stoppage-announced',
+      description: `Fourth official's board goes up: +${minutes} minutes.`,
+      modelReaction: `Model extends the remaining-time clock by ${minutes} minutes to match the board.`,
+    })
+  }
+
+  private blowHalfTime(): void {
+    this.appendEvent({
+      minute: this.match.minute,
+      stoppageMinute: this.currentStoppageMinute(),
+      type: 'half-time',
+      description: 'Half-time whistle.',
+      modelReaction: 'Model holds probabilities steady until the second half resumes.',
+    })
+    this.match = { ...this.match, phase: 'half-time', stoppageMinute: 0 }
+  }
+
+  private blowFullTime(): void {
+    this.appendEvent({
+      minute: this.match.minute,
+      stoppageMinute: this.currentStoppageMinute(),
+      type: 'full-time',
+      description: 'Full-time whistle.',
+      modelReaction: 'Result is locked in — probabilities settle at the final outcome.',
+    })
+    this.match = { ...this.match, phase: 'full-time' }
   }
 
   private maybeRunAmbientEvents(): void {
-    if (this.match.phase !== 'first-half' && this.match.phase !== 'second-half') return
-
     for (const team of ['home', 'away'] as TeamId[]) {
-      const goalChance = this.goalProbabilityForTeam(team)
-      if (Math.random() < goalChance) {
-        this.scoreGoal(team, this.randomGoalDescription())
-        continue
-      }
-      if (Math.random() < CHANCE_EVENT_PROBABILITY) {
-        this.createChance(team)
+      const shotProbability = this.shotProbabilityForTeam(team)
+      if (Math.random() < shotProbability) {
+        this.takeShot(team)
         continue
       }
       if (Math.random() < YELLOW_CARD_PROBABILITY) {
@@ -228,31 +370,64 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
     }
   }
 
-  private goalProbabilityForTeam(team: TeamId): number {
+  private shotProbabilityForTeam(team: TeamId): number {
+    const base = baseShotsPerMinute(team)
+
     const own = this.match.redCards[team]
     const opp = this.match.redCards[opponent(team)]
-    const redAdjust = Math.pow(0.62, own) * Math.pow(1.25, opp)
-    const momentumAdjust = 1 + this.match.momentum[team] * 0.5
-    return BASE_GOAL_CHANCE_PER_MINUTE * redAdjust * momentumAdjust
+    const redAdjust = Math.pow(RED_CARD_OWN_FACTOR, own) * Math.pow(RED_CARD_OPP_FACTOR, opp)
+
+    const momentumAdjust = 1 + this.match.momentum[team] * MOMENTUM_SHOT_BOOST
+
+    let chaseAdjust = 1
+    if (this.match.minute >= CHASE_START_MINUTE) {
+      const diff = this.match.score[team] - this.match.score[opponent(team)]
+      if (diff < 0) chaseAdjust = CHASE_TRAILING_FACTOR
+      else if (diff > 0) chaseAdjust = CHASE_LEADING_FACTOR
+    }
+
+    return base * redAdjust * momentumAdjust * chaseAdjust
   }
 
-  private decayMomentum(): void {
+  private takeShot(team: TeamId): void {
+    const isBigChance = Math.random() < BIG_CHANCE_PROBABILITY
+    const shotXg = isBigChance ? BIG_CHANCE_XG : REGULAR_SHOT_XG
+    const isGoal = Math.random() < shotXg
+
+    if (isGoal) {
+      this.recordShot(team, true)
+      this.scoreGoal(team, this.randomGoalDescription())
+      return
+    }
+
+    const onTargetProbability = isBigChance
+      ? BIG_CHANCE_ON_TARGET_PROBABILITY
+      : REGULAR_ON_TARGET_PROBABILITY
+    const onTarget = Math.random() < onTargetProbability
+    this.recordShot(team, onTarget)
+
+    if (onTarget) {
+      this.recordShotOnTarget(team, isBigChance)
+    } else {
+      this.recordShotOffTarget(team, isBigChance)
+    }
+  }
+
+  private recordShot(team: TeamId, onTarget: boolean): void {
+    const current = this.match.shots[team]
     this.match = {
       ...this.match,
-      momentum: {
-        home: clamp01(this.match.momentum.home * MOMENTUM_DECAY),
-        away: clamp01(this.match.momentum.away * MOMENTUM_DECAY),
+      shots: {
+        ...this.match.shots,
+        [team]: { total: current.total + 1, onTarget: current.onTarget + (onTarget ? 1 : 0) },
       },
     }
   }
 
-  private bumpMomentum(team: TeamId, amount: number): void {
+  private recomputeMomentum(): void {
     this.match = {
       ...this.match,
-      momentum: {
-        ...this.match.momentum,
-        [team]: clamp01(this.match.momentum[team] + amount),
-      },
+      momentum: computeMomentum(this.match.events, matchEffectiveMinute(this.match)),
     }
   }
 
@@ -265,11 +440,11 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
         [team]: this.match.score[team] + 1,
       },
     }
-    this.bumpMomentum(team, MOMENTUM_GOAL_BUMP)
 
     const leadDescription = this.describeLead(team)
     this.appendEvent({
       minute: this.match.minute,
+      stoppageMinute: this.currentStoppageMinute(),
       type: 'goal',
       team,
       description: `GOAL! ${teamName} — ${description}.`,
@@ -298,15 +473,29 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
     return 'Win probability rises — there is still time for a reply, so the swing is measured.'
   }
 
-  private createChance(team: TeamId): void {
+  private recordShotOnTarget(team: TeamId, isBigChance: boolean): void {
     const teamName = this.match.teams[team].name
-    this.bumpMomentum(team, MOMENTUM_CHANCE_BUMP)
+    const flavor = isBigChance ? 'A big chance' : 'A shot'
     this.appendEvent({
       minute: this.match.minute,
-      type: 'chance',
+      stoppageMinute: this.currentStoppageMinute(),
+      type: 'shot-on-target',
       team,
-      description: `Chance for ${teamName} — the keeper does well to keep it out.`,
+      description: `${flavor} for ${teamName} — ${this.randomSaveDescription()}.`,
       modelReaction: `${teamName} momentum ticks up — remaining xG shifts modestly their way.`,
+    })
+  }
+
+  private recordShotOffTarget(team: TeamId, isBigChance: boolean): void {
+    const teamName = this.match.teams[team].name
+    const flavor = isBigChance ? 'A big chance' : 'A shot'
+    this.appendEvent({
+      minute: this.match.minute,
+      stoppageMinute: this.currentStoppageMinute(),
+      type: 'shot-off-target',
+      team,
+      description: `${flavor} for ${teamName} — ${this.randomMissDescription()}.`,
+      modelReaction: `Chance goes begging for ${teamName} — model barely moves.`,
     })
   }
 
@@ -314,6 +503,7 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
     const teamName = this.match.teams[team].name
     this.appendEvent({
       minute: this.match.minute,
+      stoppageMinute: this.currentStoppageMinute(),
       type: 'yellow-card',
       team,
       description: `Yellow card shown to a ${teamName} player for a late challenge.`,
@@ -326,6 +516,7 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
     const teamName = this.match.teams[team].name
     this.appendEvent({
       minute: this.match.minute,
+      stoppageMinute: this.currentStoppageMinute(),
       type: 'substitution',
       team,
       description: `${teamName} make a substitution, freshening up their attack.`,
@@ -344,11 +535,16 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
     }
     this.appendEvent({
       minute: this.match.minute,
+      stoppageMinute: this.currentStoppageMinute(),
       type: 'red-card',
       team,
       description: `RED CARD! A ${teamName} player is sent off.`,
       modelReaction: `${teamName} down to ten men — their remaining xG drops sharply while the opponent's rises.`,
     })
+  }
+
+  private currentStoppageMinute(): number | undefined {
+    return this.match.stoppageMinute > 0 ? this.match.stoppageMinute : undefined
   }
 
   private randomGoalDescription(): string {
@@ -362,8 +558,31 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
     return options[Math.floor(Math.random() * options.length)]
   }
 
+  private randomSaveDescription(): string {
+    const options = [
+      'the keeper parries it away',
+      'a flying save tips it over the bar',
+      'the keeper gets down well to smother it',
+      'a strong hand keeps it out at the near post',
+      'the keeper stands tall to block it',
+    ]
+    return options[Math.floor(Math.random() * options.length)]
+  }
+
+  private randomMissDescription(): string {
+    const options = [
+      'drags it wide of the far post',
+      'blazes over the crossbar',
+      'sees the effort blocked by a last-ditch defender',
+      'sends it into the side netting',
+      'can only watch it drift wide',
+    ]
+    return options[Math.floor(Math.random() * options.length)]
+  }
+
   private appendEvent(partial: {
     minute: number
+    stoppageMinute?: number
     type: MatchEventType
     team?: TeamId
     description: string
@@ -374,6 +593,7 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
       ...partial,
     }
     this.match = { ...this.match, events: [...this.match.events, event] }
+    this.recomputeMomentum()
   }
 
   private snapshot(): Match {
@@ -382,6 +602,8 @@ export class SimulatedMatchProvider implements LiveMatchProvider, SimulationCont
       teams: { home: { ...this.match.teams.home }, away: { ...this.match.teams.away } },
       score: { ...this.match.score },
       redCards: { ...this.match.redCards },
+      shots: { home: { ...this.match.shots.home }, away: { ...this.match.shots.away } },
+      announcedStoppage: { ...this.match.announcedStoppage },
       momentum: { ...this.match.momentum },
       events: this.match.events.map((e) => ({ ...e })),
     }

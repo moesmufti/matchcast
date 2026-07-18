@@ -1,4 +1,5 @@
 import type { Match, MatchPhase } from '../domain/types'
+import { formatMatchMinute } from '../domain/clock'
 
 const PHASE_LABEL: Record<MatchPhase, string> = {
   'pre-match': 'Pre-match model',
@@ -6,10 +7,6 @@ const PHASE_LABEL: Record<MatchPhase, string> = {
   'half-time': 'Half-time',
   'second-half': 'Second half',
   'full-time': 'Full-time model',
-}
-
-function formatClock(minute: number): string {
-  return `${String(Math.max(0, minute)).padStart(2, '0')}:00`
 }
 
 /**
@@ -73,7 +70,7 @@ export function MatchHeader({ match }: MatchHeaderProps) {
             {match.score.home}–{match.score.away}
           </div>
           <div className="hero__bug">
-            <span className="hero__clock">{formatClock(match.minute)}</span>
+            <span className="hero__clock">{formatMatchMinute(match)}</span>
             <span className="hero__phase">{PHASE_LABEL[match.phase]}</span>
           </div>
         </div>

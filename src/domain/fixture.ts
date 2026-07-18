@@ -36,8 +36,14 @@ export function createInitialMatch(): Match {
     },
     phase: 'pre-match',
     minute: 0,
+    stoppageMinute: 0,
+    announcedStoppage: { firstHalf: null, secondHalf: null },
     score: { home: 0, away: 0 },
     redCards: { home: 0, away: 0 },
+    shots: {
+      home: { total: 0, onTarget: 0 },
+      away: { total: 0, onTarget: 0 },
+    },
     momentum: { home: 0, away: 0 },
     events: [],
     lineups: {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ConnectionStatus, Match, PredictionState, ProbabilitySnapshot } from '../domain/types'
 import { PRE_MATCH_MODEL } from '../domain/fixture'
 import { computePrediction } from '../domain/prediction'
+import { matchEffectiveMinute } from '../domain/clock'
 import type { LiveMatchProvider } from '../providers/LiveMatchProvider'
 
 const MAX_HISTORY = 120
@@ -37,7 +38,7 @@ export function useLiveMatch(provider: LiveMatchProvider): LiveMatchState {
       setState((prev) => {
         const prediction = computePrediction(match, PRE_MATCH_MODEL)
         const snapshot: ProbabilitySnapshot = {
-          minute: match.minute,
+          minute: matchEffectiveMinute(match),
           home: prediction.probabilities.home,
           draw: prediction.probabilities.draw,
           away: prediction.probabilities.away,

@@ -31,6 +31,10 @@ export interface SimulationControls {
   /** Advance the match clock by the given number of minutes. */
   advanceClock(minutes: number): void
   isRunning(): boolean
+  /** Set the simulation speed multiplier over real time (1 = real time, 60 = 1 match minute/sec). */
+  setSpeed(multiplier: number): void
+  /** Current simulation speed multiplier. */
+  getSpeed(): number
 }
 
 export function supportsSimulation(

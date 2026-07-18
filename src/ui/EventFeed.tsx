@@ -1,12 +1,15 @@
 import type { MatchEvent, MatchEventType } from '../domain/types'
+import { formatEventMinute } from '../domain/clock'
 
 const ICONS: Record<MatchEventType, string> = {
   kickoff: '⏱',
   goal: '⚽',
-  chance: '⚡',
+  'shot-on-target': '🧤',
+  'shot-off-target': '⚡',
   'yellow-card': '🟨',
   'red-card': '🟥',
   substitution: '🔁',
+  'stoppage-announced': '➕',
   'half-time': '⏱',
   'second-half-start': '⏱',
   'full-time': '⏱',
@@ -40,7 +43,7 @@ export function EventFeed({ events }: EventFeedProps) {
             className={`event-feed__item event-feed__item--${event.team ?? 'neutral'}`}
             key={event.id}
           >
-            <span className="event-feed__minute">{event.minute}'</span>
+            <span className="event-feed__minute">{formatEventMinute(event)}</span>
             <span className="event-feed__icon" aria-hidden="true">
               {ICONS[event.type]}
             </span>

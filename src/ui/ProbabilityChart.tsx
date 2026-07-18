@@ -15,16 +15,21 @@ function yFor(value: number): number {
   return MARGIN_TOP + PLOT_HEIGHT - (value / 100) * PLOT_HEIGHT
 }
 
-function xFor(minute: number): number {
-  return MARGIN_LEFT + (Math.min(minute, FULL_MATCH) / FULL_MATCH) * PLOT_WIDTH
+/**
+ * X position for a minute. `domainMax` is normally 90 but stretches past it
+ * once stoppage time pushes the effective minute beyond 90, so added time
+ * keeps drawing left-to-right instead of piling up on the right edge.
+ */
+function xFor(minute: number, domainMax: number): number {
+  return MARGIN_LEFT + (Math.min(minute, domainMax) / domainMax) * PLOT_WIDTH
 }
 
 /**
- * X position for each snapshot: minutes map onto the 0–90 timeline; multiple
- * snapshots within the same minute fan out fractionally so vertical jumps
- * (goals, cards) stay visible as sharp steps rather than overdrawing.
+ * X position for each snapshot: minutes map onto the 0–domainMax timeline;
+ * multiple snapshots within the same minute fan out fractionally so vertical
+ * jumps (goals, cards) stay visible as sharp steps rather than overdrawing.
  */
-function xPositions(history: ProbabilitySnapshot[]): number[] {
+function xPositions(history: ProbabilitySnapshot[], domainMax: number): number[] {
   const positions: number[] = []
   for (let i = 0; i < history.length; i++) {
     const minute = history[i].minute
@@ -36,7 +41,7 @@ function xPositions(history: ProbabilitySnapshot[]): number[] {
         if (j !== i) sameMinuteCount++
       }
     }
-    positions.push(xFor(minute + sameMinuteIndex / Math.max(1, sameMinuteCount)))
+    positions.push(xFor(minute + sameMinuteIndex / Math.max(1, sameMinuteCount), domainMax))
   }
   return positions
 }
@@ -69,7 +74,9 @@ interface GoalMarker {
 }
 
 export function ProbabilityChart({ history, events }: ProbabilityChartProps) {
-  const xs = xPositions(history)
+  const lastMinute = history.length > 0 ? history[history.length - 1].minute : 0
+  const domainMax = Math.max(FULL_MATCH, lastMinute)
+  const xs = xPositions(history, domainMax)
   const homeLine = buildLine(history, xs, 'home')
   const drawLine = buildLine(history, xs, 'draw')
   const awayLine = buildLine(history, xs, 'away')
@@ -78,8 +85,6 @@ export function ProbabilityChart({ history, events }: ProbabilityChartProps) {
   const goals: GoalMarker[] = events
     .filter((e) => e.type === 'goal' && e.team)
     .map((e) => ({ minute: e.minute, team: e.team as TeamId }))
-
-  const lastMinute = history.length > 0 ? history[history.length - 1].minute : 0
 
   return (
     <div className="chart">
@@ -107,18 +112,18 @@ export function ProbabilityChart({ history, events }: ProbabilityChartProps) {
               </text>
             </g>
           ))}
-          {[15, 30, 45, 60, 75].map((minute) => (
+          {[15, 30, 45, 60, 75, 90].map((minute) => (
             <g key={minute}>
               <line
                 className={`chart__minute-line${minute === 45 ? ' chart__minute-line--ht' : ''}`}
-                x1={xFor(minute)}
-                x2={xFor(minute)}
+                x1={xFor(minute, domainMax)}
+                x2={xFor(minute, domainMax)}
                 y1={MARGIN_TOP}
                 y2={yFor(0)}
               />
               <text
                 className="chart__axis-label chart__axis-label--x"
-                x={xFor(minute)}
+                x={xFor(minute, domainMax)}
                 y={HEIGHT - 8}
               >
                 {minute === 45 ? 'HT' : `${minute}'`}
@@ -133,14 +138,14 @@ export function ProbabilityChart({ history, events }: ProbabilityChartProps) {
             <g key={`${goal.minute}-${goal.team}-${i}`}>
               <line
                 className={`chart__goal-line chart__goal-line--${goal.team}`}
-                x1={xFor(goal.minute)}
-                x2={xFor(goal.minute)}
+                x1={xFor(goal.minute, domainMax)}
+                x2={xFor(goal.minute, domainMax)}
                 y1={MARGIN_TOP}
                 y2={yFor(0)}
               />
               <circle
                 className={`chart__goal-dot chart__goal-dot--${goal.team}`}
-                cx={xFor(goal.minute)}
+                cx={xFor(goal.minute, domainMax)}
                 cy={MARGIN_TOP + 6}
                 r={4}
               />
@@ -149,8 +154,8 @@ export function ProbabilityChart({ history, events }: ProbabilityChartProps) {
           {lastMinute > 0 && lastMinute < FULL_MATCH && (
             <line
               className="chart__now-line"
-              x1={xFor(lastMinute)}
-              x2={xFor(lastMinute)}
+              x1={xFor(lastMinute, domainMax)}
+              x2={xFor(lastMinute, domainMax)}
               y1={MARGIN_TOP}
               y2={yFor(0)}
             />

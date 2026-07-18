@@ -12,6 +12,8 @@ function cloneMatch(overrides: Partial<Match> = {}): Match {
     score: { ...base.score, ...(overrides.score ?? {}) },
     redCards: { ...base.redCards, ...(overrides.redCards ?? {}) },
     momentum: { ...base.momentum, ...(overrides.momentum ?? {}) },
+    announcedStoppage: { ...base.announcedStoppage, ...(overrides.announcedStoppage ?? {}) },
+    shots: overrides.shots ?? base.shots,
     events: overrides.events ?? base.events,
   }
 }
@@ -177,6 +179,73 @@ describe('computePrediction - time decay of uncertainty', () => {
     const midResult = computePrediction(midMatch, PRE_MATCH_MODEL)
     const lateResult = computePrediction(lateMatch, PRE_MATCH_MODEL)
     expect(lateResult.probabilities.home).toBeGreaterThan(midResult.probabilities.home)
+  })
+})
+
+describe('computePrediction - stoppage time', () => {
+  it('keeps a 1-0 lead short of certainty while second-half stoppage is played', () => {
+    const inStoppage = cloneMatch({
+      phase: 'second-half',
+      minute: 90,
+      stoppageMinute: 3,
+      announcedStoppage: { firstHalf: 2, secondHalf: 5 },
+      score: { home: 1, away: 0 },
+    })
+    const result = computePrediction(inStoppage, PRE_MATCH_MODEL)
+    expect(result.probabilities.home).toBeGreaterThan(80)
+    expect(result.probabilities.home).toBeLessThan(100)
+  })
+
+  it('never reaches certainty even when play runs past the announced added time', () => {
+    const deepStoppage = cloneMatch({
+      phase: 'second-half',
+      minute: 90,
+      stoppageMinute: 9,
+      announcedStoppage: { firstHalf: 2, secondHalf: 5 },
+      score: { home: 1, away: 0 },
+    })
+    const result = computePrediction(deepStoppage, PRE_MATCH_MODEL)
+    expect(result.probabilities.home).toBeLessThan(100)
+    expect(result.probabilities.away).toBeGreaterThanOrEqual(0)
+  })
+
+  it('a longer announced board keeps the trailing team more alive', () => {
+    const shortBoard = cloneMatch({
+      phase: 'second-half',
+      minute: 90,
+      stoppageMinute: 0,
+      announcedStoppage: { firstHalf: 2, secondHalf: 1 },
+      score: { home: 1, away: 0 },
+    })
+    const longBoard = cloneMatch({
+      phase: 'second-half',
+      minute: 90,
+      stoppageMinute: 0,
+      announcedStoppage: { firstHalf: 2, secondHalf: 9 },
+      score: { home: 1, away: 0 },
+    })
+    const shortResult = computePrediction(shortBoard, PRE_MATCH_MODEL)
+    const longResult = computePrediction(longBoard, PRE_MATCH_MODEL)
+    expect(shortResult.probabilities.home).toBeGreaterThan(longResult.probabilities.home)
+  })
+
+  it('first-half stoppage still leaves the whole second half in the model', () => {
+    const firstHalfStoppage = cloneMatch({
+      phase: 'first-half',
+      minute: 45,
+      stoppageMinute: 2,
+      score: { home: 1, away: 0 },
+    })
+    const halfTime = cloneMatch({
+      phase: 'half-time',
+      minute: 45,
+      score: { home: 1, away: 0 },
+    })
+    const inStoppage = computePrediction(firstHalfStoppage, PRE_MATCH_MODEL)
+    const atBreak = computePrediction(halfTime, PRE_MATCH_MODEL)
+    // Similar amounts of match left → similar (not wildly different) leads.
+    expect(Math.abs(inStoppage.probabilities.home - atBreak.probabilities.home)).toBeLessThan(6)
+    expect(inStoppage.probabilities.home).toBeLessThan(90)
   })
 })
 

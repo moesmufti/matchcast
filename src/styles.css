@@ -1012,3 +1012,14 @@ button {
     transition: none !important;
   }
 }
+
+/* ==========================================================================
+   Realistic simulation additions: active speed toggle state
+   (appended — see CLAUDE.md: never reformat existing rules in this file)
+   ========================================================================== */
+
+.btn[aria-pressed='true'] {
+  background: linear-gradient(135deg, #1f78ff, #7b61ff);
+  border-color: transparent;
+  color: #fff;
+}

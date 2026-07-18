@@ -10,4 +10,11 @@
   //   wrangler secret put SPORTS_API_KEY
   // They are then available on the Hono context env in worker/index.ts and
   // must never be imported into src/ (browser) code.
+  //
+  // Optional plain var to pin the football-data.org match id (skips the
+  // discovery request). Uncomment and set to a real id if you don't want the
+  // worker auto-discovering the WC / THIRD_PLACE fixture for today ± 1 day:
+  // "vars": {
+  //   "SPORTS_MATCH_ID": "497654",
+  // },
 }

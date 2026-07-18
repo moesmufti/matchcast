@@ -6,11 +6,18 @@ interface SimControlsProps {
   controls: SimulationControls
 }
 
+const SPEED_OPTIONS: { value: number; label: string }[] = [
+  { value: 1, label: '1× real time' },
+  { value: 15, label: '15×' },
+  { value: 60, label: '60×' },
+]
+
 export function SimControls({ match, controls }: SimControlsProps) {
   const isFullTime = match.phase === 'full-time'
   const isPreMatch = match.phase === 'pre-match'
   const running = controls.isRunning()
   const canInject = !isPreMatch && !isFullTime
+  const speed = controls.getSpeed()
 
   let toggleLabel: string
   let toggleDisabled = false
@@ -57,6 +64,22 @@ export function SimControls({ match, controls }: SimControlsProps) {
           >
             +5 min
           </button>
+        </div>
+      </div>
+      <div className="sim-controls__group">
+        <span className="sim-controls__group-label">Speed</span>
+        <div className="sim-controls__row">
+          {SPEED_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className="btn"
+              aria-pressed={speed === option.value}
+              onClick={() => controls.setSpeed(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
       </div>
       <div className="sim-controls__teams">

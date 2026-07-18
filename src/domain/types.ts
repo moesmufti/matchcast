@@ -19,10 +19,12 @@ export type MatchPhase = 'pre-match' | 'first-half' | 'half-time' | 'second-half
 export type MatchEventType =
   | 'kickoff'
   | 'goal'
-  | 'chance'
+  | 'shot-on-target'
+  | 'shot-off-target'
   | 'yellow-card'
   | 'red-card'
   | 'substitution'
+  | 'stoppage-announced'
   | 'half-time'
   | 'second-half-start'
   | 'full-time'
@@ -31,6 +33,8 @@ export type MatchEventType =
 export interface MatchEvent {
   id: string
   minute: number
+  /** Minutes past 45'/90' when the event happened in stoppage time (e.g. 2 for 45+2'). */
+  stoppageMinute?: number
   type: MatchEventType
   team?: TeamId
   description: string
@@ -41,6 +45,11 @@ export interface MatchEvent {
 export interface Score {
   home: number
   away: number
+}
+
+export interface ShotCounts {
+  total: number
+  onTarget: number
 }
 
 export interface LineupPlayer {
@@ -64,13 +73,20 @@ export interface Match {
   kickoffIso: string
   teams: Record<TeamId, Team>
   phase: MatchPhase
-  /** Elapsed match minute, 0–90. */
+  /** Regulation minute, 0–90. Holds at 45/90 while stoppage time is played. */
   minute: number
+  /** Minutes played beyond 45'/90' in the current half (0 in open play). */
+  stoppageMinute: number
+  /** Fourth-official added time per half; null until announced. */
+  announcedStoppage: { firstHalf: number | null; secondHalf: number | null }
   score: Score
   redCards: Record<TeamId, number>
+  /** Shot counts per team, updated live. Drives the momentum model. */
+  shots: Record<TeamId, ShotCounts>
   /**
-   * Recent attacking momentum per team, 0–1. Decays over time and rises
-   * with chances/goals. Feeds the prediction model.
+   * Recent attacking momentum per team, 0–1. Derived purely from recent
+   * shot/goal events via `computeMomentum` (src/domain/momentum.ts) —
+   * providers must keep it in sync with `events`. Feeds the prediction model.
    */
   momentum: Record<TeamId, number>
   events: MatchEvent[]
