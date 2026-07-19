@@ -403,6 +403,52 @@ describe('mapFeedToMatch', () => {
     expect(match.lineups?.away.players.map((p) => p.name)).toContain('Messi')
   })
 
+  it('anchors the estimated clock on an observed second-half restart instead of assuming a 15-minute interval', () => {
+    const minsAfterKickoff = (m: number) => Date.parse(KICKOFF_ISO) + m * 60_000
+    const htScore = { fullTime: { home: 0, away: 1 }, halfTime: { home: 0, away: 1 } }
+
+    // Poll during a long interval (kickoff was also slightly delayed).
+    const atHalfTime = mapFeedToMatch(
+      baseFeed({ status: 'PAUSED', minute: null, score: htScore }),
+      createInitialContext(),
+      minsAfterKickoff(53),
+    )
+    expect(atHalfTime.match.phase).toBe('half-time')
+
+    // The PAUSED → IN_PLAY transition at wall-clock +68' IS the restart:
+    // the clock must resume at 45', not at the unanchored 68-20=48.
+    const restart = baseFeed({ status: 'IN_PLAY', minute: null, score: htScore })
+    const atRestart = mapFeedToMatch(restart, atHalfTime.context, minsAfterKickoff(68))
+    expect(atRestart.match.phase).toBe('second-half')
+    expect(atRestart.match.minute).toBe(45)
+
+    // Ten minutes later the anchored clock reads 55' regardless of how long
+    // the first half or the interval actually ran.
+    const tenLater = mapFeedToMatch(restart, atRestart.context, minsAfterKickoff(78))
+    expect(tenLater.match.minute).toBe(55)
+  })
+
+  it('floors the estimated clock at the latest itemized event minute', () => {
+    const feed = baseFeed({
+      status: 'IN_PLAY',
+      minute: null,
+      score: { fullTime: { home: 0, away: 0 }, halfTime: { home: null, away: null } },
+      bookings: [
+        {
+          minute: 38,
+          team: { id: 2, name: 'Away FC' },
+          player: { id: 205, name: 'Midfielder' },
+          card: 'YELLOW',
+        },
+      ],
+    })
+
+    // Wall clock says 5 minutes after kickoff (stale utcDate scenarios,
+    // delayed page loads) but the vendor has already stamped a 38' booking.
+    const { match } = mapFeedToMatch(feed, createInitialContext(), NOW_MS)
+    expect(match.minute).toBe(38)
+  })
+
   it('maps FINISHED to full-time', () => {
     const feed = baseFeed({
       status: 'FINISHED',

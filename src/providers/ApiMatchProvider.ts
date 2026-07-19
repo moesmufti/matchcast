@@ -64,6 +64,15 @@ export interface MapContext {
    * seen at; trimmed again as the vendor itemizes (or VAR disallows).
    */
   syntheticGoalEvents: Record<TeamId, MatchEvent[]>
+  /** Vendor status seen on the previous poll — status transitions between
+   * polls are the only exact clock signals the free tier gives us. */
+  lastVendorStatus: VendorMatchStatus | null
+  /**
+   * Estimated-clock anchor: the referee's clock stood at `baseMinute` at
+   * `anchoredAtMs` (an observed kickoff/restart instant). Null until the
+   * page witnesses a transition; cleared again at each break.
+   */
+  clockAnchor: { baseMinute: number; anchoredAtMs: number } | null
   announcedStoppage: {
     firstHalf: number | null
     secondHalf: number | null
@@ -81,6 +90,8 @@ export function createInitialContext(): MapContext {
     syntheticShotEvents: [],
     syntheticShotCounter: { home: 0, away: 0 },
     syntheticGoalEvents: { home: [], away: [] },
+    lastVendorStatus: null,
+    clockAnchor: null,
     announcedStoppage: {
       firstHalf: null,
       secondHalf: null,
@@ -110,11 +121,17 @@ export function estimateMinuteFromKickoff(utcDate: string, nowMs: number): numbe
   if (Number.isNaN(kickoffMs)) return 0
 
   const elapsed = Math.max(0, (nowMs - kickoffMs) / 60_000)
-  if (elapsed <= 60) return Math.min(45, elapsed)
-  // Past an hour from kickoff, assume a ~15 minute half-time break has
-  // already happened and the clock is running in the second half.
-  return Math.min(90, elapsed - 15)
+  // ~65 wall-clock minutes covers the first half, typical stoppage and the
+  // interval — hold at 45 through that window.
+  if (elapsed <= 65) return Math.min(45, elapsed)
+  // Beyond it, assume ~3' first-half stoppage plus a ~17' interval have been
+  // consumed. Only a fallback — an observed restart transition (see
+  // `MapContext.clockAnchor`) replaces this estimate entirely.
+  return Math.min(90, elapsed - 20)
 }
+
+/** How far an anchored estimate may run past a period's base (stoppage). */
+const MAX_ESTIMATED_STOPPAGE = 10
 
 /** Which quarter of the match we're in — first/second half, or the two extra-time periods. */
 type MatchPeriod = 'first' | 'second' | 'et-first' | 'et-second'
@@ -135,7 +152,9 @@ function resolvePeriod(feed: LiveFeedPayload, minute: number): MatchPeriod {
   if (feed.status === 'EXTRA_TIME') {
     return minute > ET_FIRST_END ? 'et-second' : 'et-first'
   }
-  if (feed.status === 'IN_PLAY' && feed.score.halfTime.home === null) return 'first'
+  // In play, the half-time score's presence is definitive either way: it
+  // only exists once the interval has been reached.
+  if (feed.status === 'IN_PLAY') return feed.score.halfTime.home === null ? 'first' : 'second'
   return minute >= 46 ? 'second' : 'first'
 }
 
@@ -500,21 +519,84 @@ export function mapFeedToMatch(
   nowMs: number,
   fixture: Match = FIXTURE,
 ): MapFeedResult {
+  // --- estimated-clock anchoring (the free tier sends minute: null) --------
+  // Elapsed-since-kickoff alone drifts off the referee's clock: kickoffs run
+  // late, stoppage varies and the interval is rarely exactly 15 minutes.
+  // A status transition observed between two polls IS the restart instant,
+  // so anchor the estimate there whenever the page has witnessed one.
+  let clockAnchor = context.clockAnchor
+  const prevStatus = context.lastVendorStatus
+  if (feed.minute === null && prevStatus !== null && prevStatus !== feed.status) {
+    if (feed.status === 'IN_PLAY') {
+      if (prevStatus === 'PAUSED') {
+        clockAnchor = { baseMinute: HALF_MINUTES, anchoredAtMs: nowMs }
+      } else if (prevStatus === 'SCHEDULED' || prevStatus === 'TIMED') {
+        clockAnchor = { baseMinute: 0, anchoredAtMs: nowMs }
+      }
+    } else if (feed.status === 'EXTRA_TIME' && prevStatus === 'PAUSED') {
+      // ET's first period restarts from 90'; by its second (the vendor has
+      // posted the extraTime score block by then) from 105'.
+      clockAnchor = {
+        baseMinute: feed.score.extraTime ? ET_FIRST_END : REGULATION_MINUTES,
+        anchoredAtMs: nowMs,
+      }
+    } else if (feed.status !== 'EXTRA_TIME') {
+      // Any break or terminal status ends the current anchor's validity.
+      clockAnchor = null
+    }
+  }
+
+  // Itemized event minutes are authoritative lower bounds: a booking stamped
+  // 63' means the referee's clock has at least reached 63.
+  const latestItemizedMinute = Math.floor(
+    Math.max(
+      0,
+      ...feed.goals.map((g) => g.minute + (g.injuryTime ?? 0)),
+      ...feed.bookings.map((b) => b.minute),
+      ...feed.substitutions.map((s) => s.minute),
+    ),
+  )
+
+  const anchoredElapsed = clockAnchor
+    ? clockAnchor.baseMinute + (nowMs - clockAnchor.anchoredAtMs) / 60_000
+    : null
+
+  const estimateInPlay = (): number => {
+    const base = feed.score.halfTime.home === null ? HALF_MINUTES : REGULATION_MINUTES
+    const raw = anchoredElapsed ?? estimateMinuteFromKickoff(feed.utcDate, nowMs)
+    // Unanchored estimates hold at the period base (no invented stoppage);
+    // an anchored clock may run a bounded stoppage past it.
+    const cap = anchoredElapsed !== null ? base + MAX_ESTIMATED_STOPPAGE : base
+    return Math.max(Math.floor(Math.min(raw, cap)), latestItemizedMinute)
+  }
+
+  const estimateExtraTime = (): number => {
+    if (anchoredElapsed !== null && clockAnchor && clockAnchor.baseMinute >= REGULATION_MINUTES) {
+      const cap =
+        (clockAnchor.baseMinute === REGULATION_MINUTES ? ET_FIRST_END : ET_SECOND_END) +
+        MAX_ESTIMATED_STOPPAGE / 2
+      return Math.max(Math.floor(Math.min(anchoredElapsed, cap)), latestItemizedMinute)
+    }
+    // No usable anchor — clamp the rough kickoff-elapsed estimate (which
+    // tops out at 90) into extra time's 91-120 window.
+    return Math.max(
+      Math.min(
+        ET_SECOND_END,
+        Math.max(
+          REGULATION_MINUTES + 1,
+          Math.floor(estimateMinuteFromKickoff(feed.utcDate, nowMs)),
+        ),
+      ),
+      latestItemizedMinute,
+    )
+  }
+
   const resolvedMinute =
     feed.minute ??
     (feed.status === 'IN_PLAY'
-      ? Math.floor(estimateMinuteFromKickoff(feed.utcDate, nowMs))
+      ? estimateInPlay()
       : feed.status === 'EXTRA_TIME'
-        ? // No itemized extra-time heuristic exists yet — clamp the same
-          // rough kickoff-elapsed estimate (which tops out at 90) into
-          // extra time's 91-120 window rather than inventing a new one.
-          Math.min(
-            ET_SECOND_END,
-            Math.max(
-              REGULATION_MINUTES + 1,
-              Math.floor(estimateMinuteFromKickoff(feed.utcDate, nowMs)),
-            ),
-          )
+        ? estimateExtraTime()
         : feed.status === 'PAUSED'
           ? // A null-minute PAUSED is one of the three breaks. The vendor
             // posts each score block as it becomes relevant, which tells
@@ -864,6 +946,8 @@ export function mapFeedToMatch(
     syntheticShotEvents: shotResult.syntheticShotEvents,
     syntheticShotCounter: shotResult.syntheticShotCounter,
     syntheticGoalEvents,
+    lastVendorStatus: feed.status,
+    clockAnchor,
     announcedStoppage: clock.announcedStoppage,
   }
 

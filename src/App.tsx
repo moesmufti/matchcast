@@ -115,6 +115,11 @@ export default function App() {
   const [provider, setProvider] = useState<LiveMatchProvider | null>(null)
 
   useEffect(() => {
+    const teams = FIXTURES[fixtureId].createInitialMatch().teams
+    document.title = `${teams.home.name} vs ${teams.away.name} | Live Match Prediction`
+  }, [fixtureId])
+
+  useEffect(() => {
     let cancelled = false
     let created: LiveMatchProvider | null = null
 

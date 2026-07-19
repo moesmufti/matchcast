@@ -234,7 +234,7 @@ export function createInitialFinalMatch(): Match {
   }
 }
 
-export const DEFAULT_FIXTURE_ID: FixtureId = 'third-place'
+export const DEFAULT_FIXTURE_ID: FixtureId = 'final'
 
 export const FIXTURES: Record<FixtureId, FixtureConfig> = {
   'third-place': {
